@@ -1,0 +1,360 @@
+import argparse
+import collections
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+
+from .auth import SessionContext, create_session, load_local_session
+from .bridge import complete_openai_response, stream_openai_response
+from .config import load_config, save_config
+from .database import get_db
+from .env import env_bool
+from .accounts import (
+    db_load_accounts,
+    db_get_settings,
+    db_set_settings,
+    import_current_auth,
+    get_active_session,
+    rotate_next_account
+)
+
+BASE_DIR = os.path.dirname(__file__)
+INDEX_HTML = Path(BASE_DIR) / "static" / "index.html"
+CONSOLE_HTML = Path(BASE_DIR) / "static" / "console.html"
+DOCS_HTML = Path(BASE_DIR) / "static" / "docs.html"
+
+app = FastAPI(title="qoder2api-python")
+app.mount("/assets", StaticFiles(directory=os.path.join(BASE_DIR, "static", "assets")), name="assets")
+
+_session: SessionContext | None = None
+_local_auth_error: str | None = None
+
+logs_queue = collections.deque(maxlen=150)
+
+
+def add_log(msg: str, level: str = "INFO") -> None:
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    formatted = f"[{timestamp}] [{level}] {msg}"
+    logs_queue.append(formatted)
+    print(formatted)
+
+
+# Add initial logs
+add_log("Qoder2API Python Bridge initialized.")
+
+
+
+def check_gateway_token(x_gateway_token: str | None = Header(default=None)):
+    config = load_config()
+    gateway_token = config.get("gateway_token", "admin")
+    if not x_gateway_token or x_gateway_token != gateway_token:
+        raise HTTPException(status_code=401, detail="Unauthorized gateway access")
+
+
+@app.post("/ui/verify")
+async def verify_gateway(payload: dict[str, Any]) -> dict[str, Any]:
+    token = payload.get("token", "").strip()
+    config = load_config()
+    if token == config.get("gateway_token", "admin"):
+        return {"status": "ok"}
+    raise HTTPException(status_code=401, detail="Invalid Gateway Token")
+
+
+async def get_session() -> SessionContext:
+    global _local_auth_error
+    data = db_load_accounts()
+    if not data["accounts"]:
+        # Try importing environment PAT if available
+        pat = os.getenv("QODER_PAT", "").strip()
+        if pat:
+            add_log("No accounts stored. Importing QODER_PAT from environment...")
+            try:
+                sess = await create_session(pat)
+                with get_db() as conn:
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO accounts (
+                            uid, name, user_type, security_oauth_token, refresh_token, machine_id,
+                            enabled, last_status, last_error
+                        ) VALUES (?, ?, ?, ?, ?, ?, 1, 'ok', NULL)
+                        """,
+                        (sess.identity.uid, sess.identity.name or "Environment PAT", sess.identity.user_type,
+                         sess.identity.security_oauth_token, sess.identity.refresh_token, sess.machine_id)
+                    )
+                db_set_settings("active_uid", sess.identity.uid)
+                add_log(f"Imported environment PAT as account: {sess.identity.name}")
+                _local_auth_error = None
+            except Exception as exc:
+                add_log(f"Failed to import environment PAT: {exc}", "ERROR")
+
+        data = db_load_accounts()
+        if not data["accounts"]:
+            add_log("No accounts stored. Attempting to auto-import current local Qoder auth session...")
+            try:
+                await import_current_auth()
+                add_log("Auto-imported current local Qoder session successfully.")
+                _local_auth_error = None
+            except Exception as exc:
+                _local_auth_error = str(exc)
+                add_log(f"Auto-import of local session failed: {exc}", "WARNING")
+
+    try:
+        return get_active_session()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No active session available: {exc}. Please configure/import an account first."
+        )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    if not env_bool("QODER_ENABLE_LANDING", True):
+        raise HTTPException(status_code=404, detail="Landing page is disabled")
+    return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/console", response_class=HTMLResponse)
+async def console() -> HTMLResponse:
+    return HTMLResponse(CONSOLE_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/documents", response_class=HTMLResponse)
+async def documents() -> HTMLResponse:
+    if not env_bool("QODER_ENABLE_DOCUMENTS", True):
+        raise HTTPException(status_code=404, detail="Documents page is disabled")
+    return HTMLResponse(DOCS_HTML.read_text(encoding="utf-8"))
+
+
+@app.get("/ui/status")
+async def status(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    global _local_auth_error
+    try:
+        await get_session()
+    except Exception:
+        pass
+
+    data = db_load_accounts()
+    active_uid = data.get("active_uid")
+    active_acc = None
+    for acc in data["accounts"]:
+        if acc["uid"] == active_uid:
+            active_acc = acc
+            break
+
+    if active_acc is not None:
+        return {
+            "ready": True,
+            "mode": "accounts",
+            "username": active_acc["name"],
+            "uid": active_acc["uid"],
+            "user_type": active_acc["user_type"],
+            "error": None,
+            "accounts_count": len(data["accounts"])
+        }
+    return {
+        "ready": False,
+        "mode": "none",
+        "username": None,
+        "uid": None,
+        "user_type": None,
+        "error": _local_auth_error,
+        "accounts_count": len(data["accounts"])
+    }
+
+
+@app.get("/ui/accounts")
+async def get_accounts(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    return db_load_accounts()
+
+
+@app.post("/ui/accounts/import")
+async def import_account(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    try:
+        acc = await import_current_auth()
+        add_log(f"Imported local Qoder session account: {acc['name']}")
+        return {"status": "ok", "account": acc}
+    except Exception as exc:
+        add_log(f"Failed to import local session account: {exc}", "ERROR")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/ui/accounts/select")
+async def select_account(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    uid = payload.get("uid")
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    with get_db() as conn:
+        res = conn.execute("SELECT uid FROM accounts WHERE uid = ?", (uid,)).fetchone()
+        if not res:
+            raise HTTPException(status_code=404, detail="Account not found")
+    db_set_settings("active_uid", uid)
+    add_log(f"Selected active account UID: {uid}")
+    return {"status": "ok"}
+
+
+@app.post("/ui/accounts/toggle")
+async def toggle_account(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    uid = payload.get("uid")
+    enabled = bool(payload.get("enabled", True))
+    if not uid:
+        raise HTTPException(status_code=400, detail="uid is required")
+    enabled_val = 1 if enabled else 0
+    with get_db() as conn:
+        res = conn.execute("UPDATE accounts SET enabled = ? WHERE uid = ?", (enabled_val, uid))
+        if res.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Account not found")
+    add_log(f"Account toggle enabled={enabled} for UID: {uid}")
+    return {"status": "ok"}
+
+
+@app.delete("/ui/accounts/{uid}")
+async def delete_account(uid: str, verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    with get_db() as conn:
+        res = conn.execute("DELETE FROM accounts WHERE uid = ?", (uid,))
+        if res.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Account not found")
+            
+    active_uid = db_get_settings("active_uid")
+    if active_uid == uid:
+        data = db_load_accounts()
+        new_active = data["accounts"][0]["uid"] if data["accounts"] else None
+        if new_active:
+            db_set_settings("active_uid", new_active)
+        else:
+            with get_db() as conn:
+                conn.execute("DELETE FROM settings WHERE key = 'active_uid'")
+    add_log(f"Deleted account UID: {uid}")
+    return {"status": "ok"}
+
+
+@app.get("/ui/logs")
+async def get_logs(verify: None = Depends(check_gateway_token)) -> list[str]:
+    return list(logs_queue)
+
+
+@app.get("/ui/config")
+async def get_ui_config(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    return load_config()
+
+
+@app.post("/ui/config")
+async def post_ui_config(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    save_config(payload)
+    add_log("API Key configuration updated.")
+    return {"status": "ok"}
+
+
+@app.post("/ui/session")
+async def set_session(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    global _local_auth_error
+    pat = str(payload.get("pat") or os.getenv("QODER_PAT", "")).strip()
+    if not pat:
+        raise HTTPException(status_code=400, detail="PAT is required")
+    try:
+        add_log("Attempting to save session from PAT...")
+        sess = await create_session(pat)
+        
+        # Insert or update in SQLite
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO accounts (
+                    uid, name, user_type, security_oauth_token, refresh_token, machine_id,
+                    enabled, last_status, last_error
+                ) VALUES (?, ?, ?, ?, ?, ?, 1, 'ok', ?)
+                """,
+                (sess.identity.uid, sess.identity.name or "PAT Account", sess.identity.user_type,
+                 sess.identity.security_oauth_token, sess.identity.refresh_token, sess.machine_id, None)
+            )
+            
+        db_set_settings("active_uid", sess.identity.uid)
+        
+        add_log(f"Session saved from PAT. User: {sess.identity.name}")
+        _local_auth_error = None
+        return {"ready": True, "id": sess.identity.uid, "name": sess.identity.name, "user_type": sess.identity.user_type}
+    except Exception as exc:
+        msg = f"Failed to authenticate with provided PAT: {exc}"
+        add_log(msg, "ERROR")
+        raise HTTPException(status_code=502, detail=msg) from exc
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+    config = load_config()
+    if config.get("auth_required", False):
+        allowed_keys = config.get("allowed_keys", [])
+        incoming_key = None
+        if authorization and authorization.startswith("Bearer "):
+            incoming_key = authorization[len("Bearer "):].strip()
+        
+        if not incoming_key or incoming_key not in allowed_keys:
+            add_log("Access denied: Invalid or missing API Key in request header.", "WARNING")
+            raise HTTPException(status_code=401, detail="Invalid or missing API Key")
+
+    model = payload.get("model", "lite")
+    stream = bool(payload.get("stream", False))
+    messages_count = len(payload.get("messages", []))
+    add_log(f"Incoming completion request: model={model}, stream={stream}, messages={messages_count}")
+    
+    accounts_data = db_load_accounts()
+    enabled_count = sum(1 for acc in accounts_data["accounts"] if acc.get("enabled", True))
+    max_retries = max(1, enabled_count)
+    
+    for attempt in range(max_retries):
+        try:
+            sess = await get_session()
+            add_log(f"Request routing via account: {sess.identity.name} ({sess.identity.uid})")
+            if stream:
+                gen = stream_openai_response(payload, sess)
+                try:
+                    first_item = await gen.__anext__()
+                except StopAsyncIteration:
+                    first_item = None
+                
+                async def stream_success_wrapper(first, g):
+                    if first is not None:
+                        yield first
+                    async for chunk in g:
+                        yield chunk
+                
+                add_log(f"Streaming response initiated (Attempt {attempt+1}/{max_retries}).")
+                return StreamingResponse(
+                    stream_success_wrapper(first_item, gen),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache"}
+                )
+            else:
+                add_log(f"Generating full completion response (Attempt {attempt+1}/{max_retries})...")
+                resp = await complete_openai_response(payload, sess)
+                add_log("Completion request finished successfully.")
+                return resp
+        except Exception as exc:
+            current_uid = sess.identity.uid if 'sess' in locals() else "unknown"
+            add_log(f"Request failed on account {current_uid}: {exc}. Rotating to next account...", "WARNING")
+            try:
+                rotate_next_account(current_uid, str(exc))
+            except Exception as e:
+                add_log(f"Failed to rotate account: {e}", "ERROR")
+                raise HTTPException(status_code=502, detail=f"Request failed and no other account is available. Error: {exc}")
+                
+    raise HTTPException(status_code=502, detail="Request failed on all available accounts.")
+
+
+def main() -> None:
+    import uvicorn
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=os.getenv("QODER_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("QODER_PORT", "5050")))
+    args = parser.parse_args()
+    uvicorn.run("qoder2api.app:app", host=args.host, port=args.port, reload=False)
+
+
+if __name__ == "__main__":
+    main()
