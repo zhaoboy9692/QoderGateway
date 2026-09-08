@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import SessionContext, create_session, load_local_session
-from .bridge import complete_openai_response, stream_openai_response
+from .bridge import MODEL_CATALOG, complete_openai_response, stream_openai_response
 from .config import load_config, save_config
 from .database import get_db
 from .env import env_bool
@@ -378,8 +378,7 @@ def is_account_error(exc: Exception) -> bool:
     return False
 
 
-@app.post("/v1/chat/completions")
-async def chat_completions(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+def validate_api_key(authorization: str | None) -> None:
     config = load_config()
     if config.get("auth_required", False):
         allowed_keys = config.get("allowed_keys", [])
@@ -390,6 +389,30 @@ async def chat_completions(payload: dict[str, Any], authorization: str | None = 
         if not incoming_key or incoming_key not in allowed_keys:
             add_log("Access denied: Invalid or missing API Key in request header.", "WARNING")
             raise HTTPException(status_code=401, detail="Invalid or missing API Key")
+
+
+@app.get("/v1/models")
+async def list_models(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """OpenAI-compatible catalog of configured HTTP model presets."""
+    validate_api_key(authorization)
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": key,
+                "object": "model",
+                "created": 0,
+                "owned_by": "qoder",
+                "name": model.get("display_name", key),
+            }
+            for key, model in MODEL_CATALOG.items()
+        ],
+    }
+
+
+@app.post("/v1/chat/completions")
+async def chat_completions(payload: dict[str, Any], authorization: str | None = Header(default=None)):
+    validate_api_key(authorization)
 
     model = payload.get("model", "lite")
     stream = bool(payload.get("stream", False))

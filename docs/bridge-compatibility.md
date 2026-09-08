@@ -45,3 +45,29 @@ private organization model) returned text through NewAPI using curl with no prox
 A two-shape PNG was correctly described by Qwen3.8-Max, GLM-5.3, and MiniMax-M3
 through NewAPI using OpenAI image_url data URLs. These are response/vision checks,
 not independent verification of underlying model versions.
+
+## Model discovery
+
+`GET /v1/models` returns an OpenAI-compatible list of the configured system and
+private model keys, using the same Bearer API key policy as chat completions.
+NewAPI can fetch channel models using this endpoint. It lists configured presets;
+it does not query live account entitlement or invoke CLI/SDK.
+
+For NewAPI channel health checks, the default 16-token budget can be exhausted
+by reasoning before any answer is generated. Use a channel parameter override
+limited to test requests, so production callers keep their own token limits:
+
+```json
+{
+  "operations": [{
+    "path": "max_tokens",
+    "mode": "set",
+    "value": 1024,
+    "conditions": [
+      {"path": "is_channel_test", "mode": "full", "value": true},
+      {"path": "max_tokens", "mode": "lt", "value": 1024}
+    ],
+    "logic": "AND"
+  }]
+}
+```
