@@ -1,5 +1,6 @@
 import argparse
 import collections
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -413,8 +414,13 @@ async def chat_completions(payload: dict[str, Any], authorization: str | None = 
                 async def stream_success_wrapper(first, g):
                     if first is not None:
                         yield first
-                    async for chunk in g:
-                        yield chunk
+                    try:
+                        async for chunk in g:
+                            yield chunk
+                    except Exception as exc:
+                        add_log(f"Upstream streaming failure: {exc}", "ERROR")
+                        error = {"error": {"message": str(exc), "type": "upstream_error", "code": "upstream_error"}}
+                        yield f"data: {json.dumps(error, ensure_ascii=False)}\n\n"
                 
                 add_log(f"Streaming response initiated (Attempt {attempt+1}/{max_retries}).")
                 return StreamingResponse(

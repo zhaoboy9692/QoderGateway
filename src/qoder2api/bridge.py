@@ -1,9 +1,11 @@
 import copy
 import json
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -14,9 +16,10 @@ from .env import httpx_client_kwargs
 
 
 QODER_CHAT_URL = "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1"
-# 新版协议（Qoder CLI 现行）：OpenAI 兼容端点，纯 Bearer，无 COSY 签名，响应为标准 OpenAI SSE。
-# 性能远优于老版（老版默认带长 reasoning，复杂任务可到分钟级）。
-QODER_CHAT_URL_NEW = "https://api2-v2.qoder.sh/model/v1/chat/completions"
+# Use the signed legacy API: the newer endpoint rejects several catalog model keys.
+MODEL_CATALOG = json.loads(Path(__file__).with_name("model_catalog.json").read_text())
+if os.getenv("QODER_MODEL_CATALOG_PATH"):
+    MODEL_CATALOG.update(json.loads(Path(os.environ["QODER_MODEL_CATALOG_PATH"]).read_text()))
 
 
 def now_ms() -> int:
@@ -78,7 +81,7 @@ def template_base() -> dict[str, Any]:
         "messages": [
             {
                 "role": "system",
-                "content": "You are Qoder, an interactive CLI tool that helps users with software engineering tasks.",
+                "content": "You are a helpful assistant.",
                 "response_meta": blank_response_meta(),
                 "reasoning_content_signature": "",
             }
@@ -110,7 +113,7 @@ def normalize_content_part(item: Any) -> str:
         if item.get("type") in {"image_url", "input_image"} and isinstance(item.get("image_url"), dict):
             url = item["image_url"].get("url")
             if isinstance(url, str):
-                return f"[image] {url}"
+                return "[image]"
         if isinstance(item.get("content"), (dict, list)):
             return normalize_content(item["content"])
         return json.dumps(item, ensure_ascii=False)
@@ -198,6 +201,11 @@ def render_tool_result(message: dict[str, Any], text: str) -> str:
 def convert_incoming_message(message: dict[str, Any], tools_enabled: bool) -> dict[str, Any] | None:
     role = message.get("role", "user")
     text = normalize_message_text(message)
+    # Preserve native OpenAI multimodal blocks; never flatten images into text URLs.
+    parts = message.get("content")
+    if role == "user" and isinstance(parts, list):
+        return {"role": "user", "content": "", "contents": copy.deepcopy(parts),
+                "response_meta": blank_response_meta(), "reasoning_content_signature": ""}
     if not tools_enabled and message.get("tool_calls"):
         calls = json.dumps(message["tool_calls"], ensure_ascii=False)
         text = f"{text}\n\nTool calls:\n{calls}" if text.strip() else f"Tool calls:\n{calls}"
@@ -239,26 +247,31 @@ def build_qoder_messages(template_messages: list[dict[str, Any]], incoming: list
 
 
 def build_qoder_body(req: dict[str, Any], sess: SessionContext) -> tuple[dict[str, Any], str, bool]:
-    """新版协议 body：OpenAI 原生格式，直接透传 messages/tools。"""
     model = req.get("model") or "lite"
     messages = req.get("messages") if isinstance(req.get("messages"), list) else []
+    prompt = extract_latest_user_prompt(messages)
+    body = template_base()
+    request_id = str(uuid.uuid4())
+    body["request_id"] = request_id
+    body["chat_record_id"] = request_id
+    body["request_set_id"] = str(uuid.uuid4())
+    body["session_id"] = str(uuid.uuid4())
+    body["stream"] = True
+    body["aliyun_user_type"] = sess.identity.user_type
+    if model not in MODEL_CATALOG:
+        raise RuntimeError(f"Unsupported model: {model}; configure QODER_MODEL_CATALOG_PATH for additional models")
+    body["model_config"] = copy.deepcopy(MODEL_CATALOG[model])
+    body["chat_context"]["extra"]["modelConfig"] = copy.deepcopy(body["model_config"])
+    for key in ("max_tokens", "temperature", "top_p", "stop"):
+        if key in req:
+            body["parameters"][key] = copy.deepcopy(req[key])
+    body["business"]["id"] = str(uuid.uuid4())
+    body["business"]["begin_at"] = now_ms()
+    body["business"]["name"] = prompt[:30]
+    body["chat_context"]["text"]["text"] = prompt
+    body["chat_context"]["extra"]["originalContent"]["text"] = prompt
     tools_enabled = bool(req.get("tools"))
-    rid = str(uuid.uuid4())
-    body: dict[str, Any] = {
-        "model": model,
-        "messages": copy.deepcopy(messages or []),
-        "stream": True,
-        "stream_options": {"include_usage": True},
-        "metadata": {
-            "context": {
-                "request_id": rid,
-                "request_set_id": rid,
-                "session_id": str(uuid.uuid4()),
-                "task_id": "common",
-                "client_type": "qodercli",
-            }
-        },
-    }
+    body["messages"] = build_qoder_messages(body["messages"], messages, prompt, tools_enabled)
     if tools_enabled:
         body["tools"] = copy.deepcopy(req["tools"])
     return body, model, tools_enabled
@@ -280,6 +293,10 @@ def extract_delta(data_line: str) -> BridgeDelta:
         obj = json.loads(data_line)
         if not isinstance(obj, dict):
             return BridgeDelta()
+        error = obj.get("error")
+        if error or str(obj.get("type", "")).endswith("error") or str(obj.get("code", "")).endswith("error"):
+            info = error if isinstance(error, dict) else obj
+            raise RuntimeError(f"Qoder upstream error: {info.get('code', 'unknown')}: {info.get('message', str(error))}")
         # 新版：标准 OpenAI chunk（choices 直接在顶层）
         if "choices" in obj:
             for choice in obj.get("choices", []):
@@ -294,14 +311,7 @@ def extract_delta(data_line: str) -> BridgeDelta:
         inner = obj.get("body") or ""
         if not inner:
             return BridgeDelta()
-        inner_json = json.loads(inner)
-        for choice in inner_json.get("choices", []):
-            delta = choice.get("delta", {})
-            role = delta.get("role") or ""
-            content = delta.get("content") or ""
-            tool_calls = delta.get("tool_calls") if isinstance(delta.get("tool_calls"), list) else None
-            if role or content or tool_calls:
-                return BridgeDelta(role, content, tool_calls)
+        return extract_delta(inner)
     except (TypeError, json.JSONDecodeError):
         return BridgeDelta()
     return BridgeDelta()
@@ -336,22 +346,20 @@ class ToolCallAccumulator:
 
 
 async def qoder_stream_lines(sess: SessionContext, body: dict[str, Any], model: str) -> AsyncIterator[str]:
-    """新版协议：POST api2-v2.qoder.sh/model/v1/chat/completions，Bearer 直连。"""
-    ctx = (body.get("metadata") or {}).get("context") or {}
-    headers = {
-        "Authorization": f"Bearer {sess.identity.security_oauth_token}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-        "User-Agent": "qoder/1.1.16",
-        "X-Request-ID": ctx.get("request_id", ""),
-        "X-Session-ID": ctx.get("session_id", ""),
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15), **httpx_client_kwargs()) as client:
-        async with client.stream("POST", QODER_CHAT_URL_NEW, json=body, headers=headers) as response:
+    encoded_body = encoding.encode(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode())
+    extra = {"x-model-key": model, "x-model-source": body.get("model_config", {}).get("source", "system")}
+    headers = bearer_headers(sess, QODER_CHAT_URL, encoded_body, "text/event-stream", extra)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15), **{**httpx_client_kwargs(), "trust_env": False}) as client:
+        async with client.stream("POST", QODER_CHAT_URL, content=encoded_body, headers=headers) as response:
             if response.status_code != 200:
                 text = await response.aread()
                 raise RuntimeError(f"HTTP {response.status_code} {text.decode(errors='replace')}")
+            error_event = False
             async for line in response.aiter_lines():
+                if line.startswith("event:"):
+                    error_event = line[6:].strip() == "error"
+                elif error_event and line.startswith("data:"):
+                    raise RuntimeError(f"Qoder upstream error: {line[5:].strip()[:1000]}")
                 if line:
                     yield line
 
@@ -425,6 +433,8 @@ async def stream_openai_response(req: dict[str, Any], sess: SessionContext) -> A
     elif pending:
         yield event(make_chunk(chunk_id, created, model, {"content": pending, "role": pending_role} if not emitted else {"content": pending}))
 
+    if not emitted and not pending and not parsed_calls and not tool_calls.calls:
+        raise RuntimeError("Qoder returned an empty response without content or tool calls")
     finish_reason = "tool_calls" if tool_calls.calls else "stop"
     yield event(make_chunk(chunk_id, created, model, {}, finish_reason))
     yield "data: [DONE]\n\n"
@@ -445,6 +455,8 @@ async def complete_openai_response(req: dict[str, Any], sess: SessionContext) ->
         if delta.tool_calls:
             tool_calls.append(delta.tool_calls)
     content = "".join(full)
+    if not content.strip() and not tool_calls.calls:
+        raise RuntimeError("Qoder returned an empty response without content or tool calls")
     fallback_tool_calls = None if tool_calls.calls or not tools_enabled else parse_tool_calls_text(content)
     message: dict[str, Any] = {"role": "assistant"}
     if fallback_tool_calls:
