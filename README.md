@@ -36,6 +36,8 @@ Special thanks to the [LINUX DO](https://linux.do) community for the platform of
 - **独立文档站** — `/documents` 提供中英文 Wiki，支持本地搜索和目录跳转
 - **自动检测语言** — 根据浏览器地区自动切换中文/英文
 
+账号使用已有 Qoder 登录会话、PAT 或账号 JSON 导入。项目不再包含自动注册功能、独立注册工具及其浏览器依赖。
+
 ## 快速开始 / Quickstart
 
 ### 安装 / Install

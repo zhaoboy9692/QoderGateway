@@ -27,7 +27,6 @@ from .accounts import (
     batch_import_accounts,
     refresh_account_metadata,
 )
-from .registrar import get_registrar_status, start_registration, stop_registration
 from .tokens import (
     refresh_all_account_tokens,
     refresh_one_account,
@@ -200,7 +199,7 @@ async def import_account(verify: None = Depends(check_gateway_token)) -> dict[st
 
 @app.post("/ui/accounts/batch-import")
 async def batch_import(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    """批量导入注册机导出的 JSON：{"accounts": [{user_id, token, refresh_token, ...}]}。"""
+    """批量导入账号 JSON：{"accounts": [{user_id, token, refresh_token, ...}]}。"""
     records = payload.get("accounts") or payload.get("records") or []
     if not isinstance(records, list) or not records:
         raise HTTPException(status_code=400, detail="accounts 数组为空")
@@ -292,32 +291,6 @@ async def delete_account(uid: str, verify: None = Depends(check_gateway_token)) 
 @app.get("/ui/logs")
 async def get_logs(verify: None = Depends(check_gateway_token)) -> list[str]:
     return list(logs_queue)
-
-
-@app.post("/ui/registrar/start")
-async def registrar_start(payload: dict[str, Any] | None = None, verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    """启动注册机（无限循环：parents 个母线程 × 每批 3 个子任务，直到调用 stop）。
-
-    body 可选：{"parents": 2}  —— 母线程数（1-6），每母线程 3 子任务并发。
-    """
-    payload = payload or {}
-    try:
-        parents = int(payload.get("parents", 2))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="parents 参数无效")
-    return start_registration(parents=parents)
-
-
-@app.post("/ui/registrar/stop")
-async def registrar_stop(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    """请求停止：当前批次完成后停止，返回本次注册统计。"""
-    return stop_registration()
-
-
-@app.get("/ui/registrar/status")
-async def registrar_status(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    """查询注册机任务状态（stage / logs / result）。"""
-    return get_registrar_status()
 
 
 @app.get("/ui/config")

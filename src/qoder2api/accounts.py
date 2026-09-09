@@ -137,7 +137,7 @@ async def import_current_auth() -> dict[str, Any]:
 
 
 def batch_import_accounts(records: list[dict]) -> dict:
-    """批量导入账号（来自注册机导出的 JSON）。
+    """批量导入账号 JSON。
 
     每条记录字段：email/password/name/user_id/token/refresh_token/expires_at/...
     返回 {"imported": n, "skipped": m}。
