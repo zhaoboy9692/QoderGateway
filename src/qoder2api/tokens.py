@@ -112,6 +112,22 @@ def get_account_quota(uid: str) -> dict[str, Any]:
     return {"ok": True, "uid": uid, "name": row["name"], "quota": r.json()}
 
 
+def quota_is_exhausted(quota: dict[str, Any]) -> bool:
+    """Only exhaust an account when no known usable credit pool remains."""
+    if quota.get("isQuotaExceeded") is True:
+        return True
+    pools = [quota.get("userQuota") or {}]
+    package = quota.get("orgResourcePackage")
+    if isinstance(package, dict) and package.get("available") is not False:
+        pools.append(package)
+    remaining = [pool.get("remaining") for pool in pools]
+    # A missing balance is unknown, not zero. Avoid rotating on incomplete data.
+    return bool(remaining) and all(
+        isinstance(value, (int, float)) and not isinstance(value, bool) and value <= 0
+        for value in remaining
+    )
+
+
 def get_all_accounts_quota() -> dict[str, Any]:
     """查询所有 enabled 账号的限额。"""
     with get_db() as conn:

@@ -4,6 +4,8 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { gsap } from 'gsap'
+import { QuotaTable } from './QuotaTable'
+import type { AccountQuota } from './quota'
 
 // ─── Types ───
 
@@ -343,7 +345,7 @@ export default function App() {
   const [showBatchImport, setShowBatchImport] = useState(false)
   const [batchJson, setBatchJson] = useState('')
   const [refreshingTokens, setRefreshingTokens] = useState(false)
-  const [quotaList, setQuotaList] = useState<{ uid: string; name: string; quota: { userQuota: { total: number; used: number; remaining: number; percentage: number } } }[] | null>(null)
+  const [quotaList, setQuotaList] = useState<AccountQuota[] | null>(null)
 
   const [logFilterAccount, setLogFilterAccount] = useState('all')
   const [logFilterStatus, setLogFilterStatus] = useState('all')
@@ -478,6 +480,7 @@ export default function App() {
   const loadQuota = useCallback(async () => {
     try {
       const resp = await authedFetch('/ui/accounts/quota')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
       setQuotaList(data.quotas || [])
     } catch { pushToast('ERROR', lang === 'zh' ? '限额查询失败' : 'Quota query failed', '') }
@@ -1008,34 +1011,7 @@ export default function App() {
                     <span className="text-sm font-semibold text-ink">{lang === 'zh' ? '账号限额（credits）' : 'Account Quota (credits)'}</span>
                     <button onClick={loadQuota} className="ml-auto text-[12px] text-body hover:text-ink flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">refresh</span>{lang === 'zh' ? '刷新' : 'Refresh'}</button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead className="bg-canvas-soft border-b border-hairline">
-                        <tr>{['Account', 'Total', 'Used', 'Remaining', 'Usage %'].map((h, i) => (
-                          <th key={i} className="px-6 py-3 text-[10px] font-semibold text-body uppercase tracking-wider">{h}</th>
-                        ))}</tr>
-                      </thead>
-                      <tbody className="divide-y divide-hairline">
-                        {quotaList.map((q, i) => {
-                          const uq = q.quota?.userQuota || {}
-                          return (
-                            <tr key={i} className="hover:bg-canvas-soft transition-colors">
-                              <td className="px-6 py-4 font-semibold text-ink">{q.name || q.uid.slice(0, 12)}</td>
-                              <td className="px-6 py-4 font-mono text-xs text-body">{uq.total ?? '--'}</td>
-                              <td className="px-6 py-4 font-mono text-xs text-body">{uq.used ?? '--'}</td>
-                              <td className={`px-6 py-4 font-mono text-xs ${uq.percentage > 0.8 ? 'text-red-600 font-bold' : 'text-body'}`}>{uq.remaining ?? '--'}</td>
-                              <td className="px-6 py-4">
-                                <div className="w-24 h-1.5 bg-hairline-strong rounded-full overflow-hidden">
-                                  <div className={`h-full ${(uq.percentage || 0) > 0.8 ? 'bg-red-500' : 'bg-mint'}`} style={{ width: `${Math.min(100, (uq.percentage || 0) * 100)}%` }} />
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                        {quotaList.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-xs text-body">{lang === 'zh' ? '暂无账号' : 'No accounts'}</td></tr>}
-                      </tbody>
-                    </table>
-                  </div>
+                  <QuotaTable entries={quotaList} lang={lang} />
                 </section>
               )}
 

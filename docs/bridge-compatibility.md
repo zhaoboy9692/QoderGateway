@@ -71,3 +71,24 @@ limited to test requests, so production callers keep their own token limits:
   }]
 }
 ```
+
+## Subscription and shared resource credits
+
+The account quota view displays `userQuota` (subscription seat) and
+`orgResourcePackage` (organization resource package) separately. Resource-package
+capacity comes from `cap`; `used` and `remaining` are shown without combining
+shared balances across accounts. Missing values display as unknown, and failed
+quota queries display the upstream error instead of misleading zero balances.
+
+Account rotation checks all available credit pools. Exhausting the subscription
+seat alone does not exhaust an account while an available package still has
+credits. The upstream `isQuotaExceeded: true` flag remains authoritative, and
+incomplete balance data does not trigger rotation.
+
+Frontend quota tests (Node.js 22.6 or later):
+
+```sh
+cd frontend
+node --experimental-strip-types --test tests/quota.test.mjs
+npm run build
+```
