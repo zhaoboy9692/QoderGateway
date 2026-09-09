@@ -1,8 +1,12 @@
-# Qoder 协议逆向研究结果
+# Qoder 协议研究记录（历史）
+
+**中文** | [English](qoder-protocol-research.en.md)
 
 > 研究日期：2026-08-06
 > 来源：反编译 `@qodercn-ai/qoderclicn@1.1.16`（npm 包，66MB，`qoderclicn.js` 单文件 bundle）+ 对 `openapi.qoder.sh` / `api2-v2.qoder.sh` / `api3.qoder.sh` 的实测抓包
 > 关联项目：QoderGateway（Python 版 qoder2api，本仓库）
+
+> 当前状态（2026-09-09）：下文保留 2026-08-06 的历史观察，并非当前功能清单。网关已实现 Token 定时刷新、Credits 查询和模型目录；当前推理使用签名的 api3 HTTP 路径。当前行为见[桥接兼容说明](bridge-compatibility.zh.md)。凭据示例已改为占位符。
 
 ---
 
@@ -20,14 +24,14 @@
 ```json
 {
   "id": "019fd6c9-...",
-  "token": "dt-0IUJEMYfFUFu9beAsx0cMaR9",
+  "token": "dt-<example-token>",
   "user_id": "019ec623-...",
-  "code_challenge": "h-1Oi6gLAOdnbUD2orefq3JxJz7j4iGjUobnD8JQJ-8",
+  "code_challenge": "<example-code-challenge>",
   "code_challenge_method": "S256",
-  "nonce": "7554805c-e90c-4110-87f8-579cbf3e16a8",
+  "nonce": "<example-nonce>",
   "expires_at": "2026-09-05T11:16:15Z",
   "refresh_token_id": "019fd6c9-...",
-  "refresh_token": "drt-Wq7deftCwhAJbQ7geTmyPrOL",
+  "refresh_token": "drt-<example-refresh-token>",
   "created_at": "2026-08-06T11:16:15Z",
   "updated_at": "2026-08-06T11:16:15Z",
   "expires_in": 2591999994,
@@ -55,7 +59,7 @@
 | `https://openapi.qoder.sh/api/v1/deviceToken/poll` | GET | 轮询 device 授权结果 | `Accept: application/json` |
 | `https://openapi.qoder.sh/api/v1/userinfo` | GET | 获取用户信息（uid/name/email/org） | `Authorization: Bearer <token>` |
 | `https://openapi.qoder.sh/api/v1/jobToken/exchange` | POST | PAT → job token | body `{"personal_token": "<PAT>"}` |
-| `https://openapi.qoder.sh/api/v1/jobToken/refresh` | POST | refresh token 换新 | body `{"refresh_token": "<drt-...>"}` |
+| `https://openapi.qoder.sh/api/v1/jobToken/refresh` | POST | refresh token 换新 | 历史记录示例为 `{"refresh_token": "<drt-...>"}`；当前实现区分设备和作业刷新凭据 |
 | `https://openapi.qoder.sh/api/v1/serviceToken/exchange` | POST | service account key 换 token | body `{"grant_type":"client_credentials","audience":"qoder","scope":"...","ttl_seconds":3600}`，头 `Authorization: Bearer <serviceKey>` |
 | `https://api2-v2.qoder.sh/model/v1/chat/completions` | POST | **OpenAI 兼容 chat 接口** | `Authorization: Bearer <token>`、`Content-Type: application/json`、`Accept: text/event-stream`、`X-Request-ID`、`X-Session-ID` |
 
@@ -197,12 +201,12 @@ const _$d = (s, k = "syJkkdK5Dxwd") => {
 
 - `verifier` + `nonce` 组合等于兑换凭证：poll URL 泄露给第三方可导致账号 token 被冒领，**不得外传**。
 - `dt-` / `drt-` token 已明文存入 `~/.qoder/qoder2api.db`，该库 = 完整登录身份，注意文件权限与备份。
-- QoderGateway 目前**未实现** token 自动刷新；`dt-` 过期后需用 `POST openapi.qoder.sh/api/v1/jobToken/refresh`（body `{"refresh_token": "<drt-...>"}`）换新后更新数据库。
+- 历史记录中的版本尚未实现 Token 自动刷新。当前版本会定时刷新：`drt-` 使用 `deviceToken/refresh`，`jrt-` 使用 `jobToken/refresh`，并回写数据库。
 
 ---
 
-## 9. 后续可做（未实施）
+## 9. 历史后续事项与当前状态
 
-- [ ] QoderGateway 增加新版协议适配：`bridge.py` 新增 `api2-v2.qoder.sh/model/v1/chat/completions` 路径（纯 Bearer，无需 COSY 签名）
-- [ ] 增加 token 自动刷新：定时/请求前检查 `expires_at`，用 `jobToken/refresh` 换新并回写数据库
-- [ ] 自动化 device flow 脚本：生成 verifier/challenge → 打印授权 URL → 轮询 poll → 拿到凭据自动入库
+- 新版推理适配：后来已测试 `api2-v2`，但部分模型被上游拒绝，当前继续使用签名的 api3 路径。
+- Token 自动刷新：已实现定时刷新和手动刷新，见 `tokens.py`；不能据此认为已经实现所有请求前的有效期检查。
+- Device flow 工具：作为历史研究事项保留；仓库内自动注册相关工具已移除。

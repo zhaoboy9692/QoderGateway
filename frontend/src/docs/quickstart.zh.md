@@ -1,5 +1,7 @@
 # 快速入门
 
+[English](quickstart.md) | [中文](quickstart.zh.md)
+
 本页说明如何从零启动 QoderGateway，管理 Qoder 账号，并完成第一次 API 调用。
 
 ## 快速入门
@@ -15,9 +17,13 @@
 先克隆仓库并安装依赖：
 
 ```bash
-git clone https://github.com/bzym2/QoderGateway.git
+git clone https://github.com/zhaoboy9692/QoderGateway.git
 cd QoderGateway
 uv sync
+cd frontend
+npm ci
+npm run build
+cd ..
 ```
 
 然后启动服务：
@@ -45,7 +51,7 @@ admin
 强烈建议你立刻修改默认密码。复制环境变量模板：
 
 ```bash
-mv .env.example .env
+cp .env.example .env
 ```
 
 然后在 `.env` 中设置管理员密码：
@@ -58,10 +64,12 @@ QODER_ADMIN_PASSWORD=your-strong-password
 
 ## 管理 Qoder 账号
 
-你可以使用两种方式：
+可使用以下方式：
 
-- 点击 **Auto Import**，从本机 Qoder auth 会话自动导入。
-- 在 **Add PAT** 中粘贴 Qoder Personal Access Token。
+- 点击**自动导入**，从本机 Qoder auth 会话自动导入。
+- 在**添加 PAT** 中粘贴 Qoder Personal Access Token。
+
+- 在**账号池 → 批量导入**中粘贴已有账号 JSON。
 
 导入后的账号会存入本地 SQLite，并按 `uid` 自动去重。
 
@@ -85,9 +93,13 @@ curl http://127.0.0.1:5050/v1/chat/completions \
 -H "Authorization: Bearer <your-api-key>"
 ```
 
+## 自动加载额度与模型
+
+进入**账号池**后，订阅席位和组织资源包额度自动加载。每个账号支持单独刷新套餐、重置日期及余额。进入**调试对话**后，模型下拉框自动加载名称，发送时映射为对应模型 ID。
+
 ## 验证请求路由
 
-打开 **Service Logs**，每次请求都会打印它被路由到哪个账号：
+打开**服务日志**，每次请求都会打印它被路由到哪个账号：
 
 ```text
 Request routing via account: Alice (019ec5c6-4bb0-7c1c-bf93-5209e1367f2b)

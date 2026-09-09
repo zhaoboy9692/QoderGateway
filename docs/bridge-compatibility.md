@@ -1,5 +1,7 @@
 # Direct HTTP model and image compatibility
 
+**English** | [中文](bridge-compatibility.zh.md)
+
 The bridge uses the signed `api3.qoder.sh/.../agent_chat_generation` HTTP protocol.
 It does not launch Qoder CLI and does not require the Agent SDK.
 
@@ -52,6 +54,10 @@ not independent verification of underlying model versions.
 private model keys, using the same Bearer API key policy as chat completions.
 NewAPI can fetch channel models using this endpoint. It lists configured presets;
 it does not query live account entitlement or invoke CLI/SDK.
+
+The console loads the same catalog through administrator-authenticated `GET /ui/models`.
+AI Playground displays model names and sends the selected request ID automatically.
+The account quota panel is shown and loaded automatically when entering Account Pool.
 
 For NewAPI channel health checks, the default 16-token budget can be exhausted
 by reasoning before any answer is generated. Use a channel parameter override

@@ -1,5 +1,7 @@
 # Architecture
 
+[English](architecture.md) | [中文](architecture.zh.md)
+
 QoderGate bridges OpenAI-compatible clients to Qoder sessions.
 
 ## Request Flow
@@ -20,10 +22,13 @@ Client
 | --- | --- |
 | `app.py` | FastAPI routes, UI auth, request routing. |
 | `accounts.py` | SQLite account CRUD and active session selection. |
-| `auth.py` | PAT exchange, local auth import, quota query. |
+| `auth.py` | PAT exchange, local-session import, and user-status queries. |
 | `bridge.py` | OpenAI-compatible stream and response conversion. |
 | `signature.py` | Bearer signing implementation. |
 | `database.py` | SQLite schema and connection helpers. |
+| `tokens.py` | Scheduled token renewal and subscription/resource credit queries. |
+| `model_catalog.json` | System presets mapping model names to request IDs. |
+
 
 ## Frontend Components
 
@@ -35,4 +40,6 @@ It is compiled into:
 src/qoder2api/static
 ```
 
-FastAPI serves the compiled `index.html` and static assets directly.
+FastAPI serves the compiled `index.html`, `console.html`, `docs.html`, and static assets directly.
+
+`ModelPicker.tsx` displays model names and selects request IDs; `QuotaTable.tsx` displays separate credit pools. Inference calls the Qoder HTTP protocol directly without launching a CLI or SDK.

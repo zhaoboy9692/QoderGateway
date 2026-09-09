@@ -163,13 +163,23 @@ function DocsApp() {
               rehypePlugins={[rehypeKatex]}
               components={{
                 h1() { return null },
+                a({ href, children }) {
+                  const filename = href?.replace(/^\.\//, '')
+                  const linkedDoc = DOC_PAGES.find(doc => filename === `${doc.id}.md` || filename === `${doc.id}.zh.md`)
+                  if (!linkedDoc) return <a href={href}>{children}</a>
+                  return <a href={href} onClick={event => {
+                    event.preventDefault()
+                    setActiveDocId(linkedDoc.id)
+                    switchLang(filename?.endsWith('.zh.md') ? 'zh' : 'en')
+                  }}>{children}</a>
+                },
                 h2({ children }) { return <h2 id={slugify(children)}>{children}</h2> },
                 h3({ children }) { return <h3 id={slugify(children)}>{children}</h3> },
                 pre({ children }) {
                   const text = String((children as any)?.props?.children || '')
                   return (
                     <div className="code-card">
-                      <button onClick={() => copyText(text)}>{copied ? 'Copied' : 'Copy'}</button>
+                      <button onClick={() => copyText(text)}>{lang === 'zh' ? (copied ? '已复制' : '复制') : (copied ? 'Copied' : 'Copy')}</button>
                       <pre>{children}</pre>
                     </div>
                   )

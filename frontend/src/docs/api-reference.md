@@ -1,12 +1,8 @@
 # API Reference
 
-QoderGate exposes an OpenAI-compatible chat completions endpoint.
+[English](api-reference.md) | [中文](api-reference.zh.md)
 
-## Base URL
-
-```text
-http://127.0.0.1:5050
-```
+Default base URL: `http://127.0.0.1:5050`.
 
 ## Chat Completions
 
@@ -14,43 +10,81 @@ http://127.0.0.1:5050
 POST /v1/chat/completions
 ```
 
-### Request Body
+When external API authentication is enabled, send `Authorization: Bearer <your-api-key>`.
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `model` | string | No | Defaults to `lite`. |
-| `messages` | array | Yes | OpenAI-style message list. |
-| `stream` | boolean | No | Enables SSE streaming when `true`. |
+| Field | Type | Description |
+| --- | --- | --- |
+| `model` | string | Configured request ID; defaults to `lite` |
+| `messages` | array | OpenAI-style message list |
+| `stream` | boolean | Use SSE when `true`; defaults to `false` |
+| `max_tokens` | number | Output budget forwarded upstream |
+| `temperature`, `top_p`, `stop` | Corresponding OpenAI field types | Forwarded upstream; actual support depends on Qoder |
 
-### Non-Streaming Example
-
-```bash
-curl http://127.0.0.1:5050/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer qg_live_xxx" \
-  -d '{
-    "model": "lite",
-    "stream": false,
-    "messages": [{ "role": "user", "content": "Explain QoderGate" }]
-  }'
-```
-
-### Streaming Example
+### Non-Streaming Request
 
 ```bash
 curl http://127.0.0.1:5050/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "lite",
-    "stream": true,
-    "messages": [{ "role": "user", "content": "Stream a short answer" }]
-  }'
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{"model":"lite","stream":false,"messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+### Streaming Request
+
+```bash
+curl -N http://127.0.0.1:5050/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-api-key>" \
+  -d '{"model":"lite","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+### Image Input
+
+The bridge forwards user `content` arrays containing `image_url` URLs or data URLs. Image understanding depends on model capabilities and account permissions.
+
+```json
+{
+  "model": "qmodel_38max",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "Describe this image."},
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,<base64-png>"}}
+    ]
+  }]
+}
+```
+
+## Model Catalog and Mapping
+
+`GET /v1/models` uses the same Bearer authentication policy as chat. The console uses administrator-authenticated `GET /ui/models`. Both return the same configured catalog:
+
+```json
+{"object":"list","data":[{"id":"gmodel","object":"model","created":0,"owned_by":"qoder","name":"GLM-5.3"}]}
+```
+
+`name` is the display label; `id` is the request value. AI Playground loads and maps these automatically. The catalog includes system presets and private overrides, not live entitlement or availability probes. Unknown IDs are rejected locally to avoid silent upstream fallback.
+
+## Account Management Queries
+
+These endpoints use `X-Gateway-Token: <gateway-token>`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /ui/accounts` | Read stored account metadata |
+| `GET /ui/accounts/quota` | Query enabled accounts' seat/resource credits and synchronize plan/reset metadata |
+| `POST /ui/accounts/{uid}/refresh` | Query one account's credits and metadata |
+| `POST /ui/accounts/refresh-tokens` | Renew login credentials |
+
+A per-account refresh returns `ok`, `metadata`, and `quota`. Bulk quota queries return `total`, `quotas`, and `metadata`; inspect each entry's `ok` and `error` for partial failures.
 
 ## Error Responses
 
 | Status | Meaning |
 | --- | --- |
-| `401` | Missing or invalid API key. |
-| `400` | No active Qoder account available. |
-| `502` | Upstream request failed across available accounts. |
+| `401` | Missing or invalid credential for that endpoint |
+| `400` | No usable account session for chat |
+| `404` | Account requested by management refresh does not exist, or the route does not exist |
+| `502` | Bridge error such as upstream failure, unsupported model, or no valid answer |
+
+Errors before streaming begins use an HTTP error response. Errors after streaming begins are emitted as OpenAI-style SSE error events. HTTP 200 or an end marker alone does not prove the model answered; inspect text or tool-call content.

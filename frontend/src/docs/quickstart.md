@@ -1,5 +1,7 @@
 # Quickstart
 
+[English](quickstart.md) | [中文](quickstart.zh.md)
+
 Start QoderGateway, manage Qoder accounts, and complete your first OpenAI-compatible API request.
 
 ## Quickstart Flow
@@ -15,9 +17,13 @@ Follow these steps:
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/bzym2/QoderGateway.git
+git clone https://github.com/zhaoboy9692/QoderGateway.git
 cd QoderGateway
 uv sync
+cd frontend
+npm ci
+npm run build
+cd ..
 ```
 
 Then start the server:
@@ -45,7 +51,7 @@ You can use `admin` for the first login.
 Change it immediately before using the gateway seriously. Copy the environment template:
 
 ```bash
-mv .env.example .env
+cp .env.example .env
 ```
 
 Then set a strong administrator password in `.env`:
@@ -62,6 +68,8 @@ Use one of these options:
 
 - Click **Auto Import** to import the current local Qoder auth session.
 - Paste a Qoder Personal Access Token into **Add PAT**.
+
+- Paste existing account JSON under **Account Pool → Batch Import**.
 
 Imported accounts are stored in SQLite and deduplicated by `uid`.
 
@@ -84,6 +92,10 @@ If API key auth is enabled, also pass:
 ```bash
 -H "Authorization: Bearer <your-api-key>"
 ```
+
+## Automatic Quota and Model Loading
+
+Opening **Account Pool** loads subscription-seat and organization-resource credits. Each account can refresh its plan, reset date, and balance. Opening **AI Playground** loads model names in a dropdown and maps selections to request IDs.
 
 ## Verify Routing
 

@@ -1,5 +1,7 @@
 # 鉴权机制
 
+[English](authentication.md) | [中文](authentication.zh.md)
+
 QoderGate 有两层鉴权：管理控制台鉴权，以及外部 API 调用鉴权。它们服务于不同场景，不应该混用。
 
 ## 管理控制台 Token
@@ -7,7 +9,7 @@ QoderGate 有两层鉴权：管理控制台鉴权，以及外部 API 调用鉴�
 你在登录页输入的密钥会作为管理密钥使用。前端请求管理接口时会发送：
 
 ```http
-X-Gateway-Token: admin
+X-Gateway-Token: <gateway-token>
 ```
 
 它保护这些接口：
@@ -16,6 +18,9 @@ X-Gateway-Token: admin
 - `/ui/accounts`
 - `/ui/config`
 - `/ui/logs`
+- `/ui/models`
+- `/ui/accounts/quota`
+- `/ui/accounts/{uid}/refresh`
 
 ## 外部 API Key
 
@@ -29,10 +34,10 @@ Authorization: Bearer <allowed-api-key>
 
 ## 两种密钥的区别
 
-| 使用场景 | Header | 作用范围 |
+| 使用场景 | 请求头 | 作用范围 |
 | --- | --- | --- |
 | 管理后台 | `X-Gateway-Token` | `/ui/*` 管理接口 |
-| OpenAI 兼容调用 | `Authorization` | `/v1/chat/completions` |
+| OpenAI 兼容调用 | `Authorization` | `/v1/chat/completions`, `/v1/models` |
 
 ## 推荐实践
 

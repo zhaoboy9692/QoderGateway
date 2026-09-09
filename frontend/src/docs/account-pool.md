@@ -1,35 +1,47 @@
 # Account Pool
 
-The account pool lets QoderGate route requests through multiple Qoder accounts and recover when one account fails.
+[English](account-pool.md) | [中文](account-pool.zh.md)
+
+The account pool manages existing Qoder sessions for request routing and account-level failover.
 
 ## Import Methods
 
-### Auto Import
+- **Auto Import** reads Qoder login files on the gateway host and stores the session in SQLite.
+- **Add PAT** exchanges a Qoder Personal Access Token for a session.
+- **Batch Import** accepts account JSON with fields such as `user_id`, `token`, and `refresh_token`.
 
-Reads the current local Qoder auth session from your machine and imports it into SQLite.
+Accounts are deduplicated by `uid`. Re-importing updates the existing record. Disabled accounts remain in the database but do not participate in routing.
 
-### Add PAT
+## Active Account and Rotation
 
-Exchanges a Qoder Personal Access Token for a usable session and stores it in the account pool.
+The active account handles requests first. Only errors recognized as account-level problems trigger rotation; ordinary upstream failures do not immediately skip an account. Quota errors cause another quota check. Failed checks or incomplete data do not justify rotation.
 
-## Deduplication
+## Credits Shown by Default
 
-Accounts are deduplicated by `uid`. Re-importing the same user updates session data instead of creating duplicates.
+Opening Account Pool displays and loads the quota table automatically.
 
-## Enable and Disable
+| Data | Meaning |
+| --- | --- |
+| `userQuota.total / used / remaining` | Subscription-seat total, used, and remaining credits |
+| `orgResourcePackage.cap / used / remaining` | Organization-resource total, used, and remaining credits |
+| `orgResourcePackage.available` | Whether the resource package is currently usable |
+| `isQuotaExceeded` | Explicit upstream exhaustion status |
 
-Disabled accounts stay in SQLite but are skipped during routing.
+An organization resource package may be shared by multiple accounts; do not sum it repeatedly. A zero seat balance alone does not exhaust an account with usable resource credits. Explicit `isQuotaExceeded: true` remains authoritative. Missing numbers are unknown; failed queries show errors.
 
-## Active Account
+## Refresh Credits and Metadata
 
-The active account is the first account used for a request. If it fails, QoderGate rotates to another enabled account.
+- **Quota / Refresh / Refresh Status** query enabled accounts and synchronize plan/reset metadata.
+- Each row's **Refresh** updates only that account and its quota-table entry.
+- **Refresh Tokens** renews credentials; it is separate from querying quotas.
 
-## Quota Fields
+Refresh provides rotating icons, a pulsing quota table, completion time, and result messages. Completion is confirmed even when balances are unchanged.
 
 | Field | Meaning |
 | --- | --- |
-| `quota` | Current quota value reported by Qoder. |
-| `is_quota_exceeded` | Whether the account is over quota. |
-| `plan` | Account plan identifier. |
-| `user_tag` | Display label from Qoder. |
-| `next_reset_at` | When quota is expected to reset. |
+| `plan` | Qoder plan identifier |
+| `user_tag` | Plan display name, such as Teams |
+| `next_reset_at` | Upstream `nextResetAt` timestamp, displayed as a date |
+| `quota` | Legacy field, not displayed as a Credits balance |
+
+Unknown plans display “Plan not fetched” rather than defaulting to Trial. Failed metadata refreshes preserve previous successful data. Dates use the browser's timezone.

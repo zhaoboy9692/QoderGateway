@@ -1,5 +1,7 @@
 # Authentication
 
+[English](authentication.md) | [中文](authentication.zh.md)
+
 QoderGate has two authentication layers: one for the management console and one for external API clients.
 
 ## Management Console Token
@@ -7,7 +9,7 @@ QoderGate has two authentication layers: one for the management console and one 
 The WebUI uses the gateway token you enter on login. Frontend requests send it as:
 
 ```http
-X-Gateway-Token: admin
+X-Gateway-Token: <gateway-token>
 ```
 
 This protects routes such as:
@@ -16,6 +18,9 @@ This protects routes such as:
 - `/ui/accounts`
 - `/ui/config`
 - `/ui/logs`
+- `/ui/models`
+- `/ui/accounts/quota`
+- `/ui/accounts/{uid}/refresh`
 
 ## External API Keys
 
@@ -32,7 +37,7 @@ Authorization: Bearer <allowed-api-key>
 | Use case | Header | Scope |
 | --- | --- | --- |
 | WebUI management | `X-Gateway-Token` | `/ui/*` routes |
-| OpenAI-compatible calls | `Authorization` | `/v1/chat/completions` |
+| OpenAI-compatible calls | `Authorization` | `/v1/chat/completions`, `/v1/models` |
 
 ## Recommended Setup
 

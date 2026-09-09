@@ -1,35 +1,47 @@
 # 账号池
 
-账号池让 QoderGate 可以通过多个 Qoder 账号处理请求，并在某个账号失败时自动切换到其他账号。
+[English](account-pool.md) | [中文](account-pool.zh.md)
+
+账号池管理已有 Qoder 会话，供请求路由和账号级失败切换使用。
 
 ## 导入方式
 
-### Auto Import
+- **自动导入**：读取网关所在机器的 Qoder 本地登录文件并保存到 SQLite。
+- **添加 PAT**：使用 Qoder Personal Access Token 换取会话。
+- **批量导入**：粘贴包含 `user_id`、`token`、`refresh_token` 等字段的账号 JSON。
 
-读取当前机器上的 Qoder 本地登录会话，并导入 SQLite。
+账号按 `uid` 去重。重复导入更新已有记录，不新增同 UID 账号。禁用账号保留在数据库中，但不参与路由。
 
-### Add PAT
+## 当前账号与轮转
 
-通过 Qoder Personal Access Token 换取可用会话，并保存到账号池。
+当前账号优先处理请求。只有被识别为账号级的问题才会触发轮转；一般上游错误不会直接跳过账号。遇到额度错误时会再查询额度，查询失败或数据不足时不会据此轮转。
 
-## 自动去重
+## 默认显示 Credits
 
-账号按 `uid` 去重。重复导入同一个用户时，会更新会话数据，而不是创建重复账号。
+进入账号池自动显示并加载限额表，不必先点击刷新。
 
-## 启用和禁用
+| 数据 | 含义 |
+| --- | --- |
+| `userQuota.total / used / remaining` | 订阅席位总额、已用及剩余 |
+| `orgResourcePackage.cap / used / remaining` | 组织资源包总额、已用及剩余 |
+| `orgResourcePackage.available` | 资源包当前是否可用 |
+| `isQuotaExceeded` | 上游明确报告的额度耗尽状态 |
 
-禁用的账号仍保留在 SQLite 中，但不会参与请求路由。
+资源包可能由同一组织的多个账号共享，不要重复相加。席位余额为零而可用资源包仍有额度时，不能仅据此判定账号耗尽；上游明确返回 `isQuotaExceeded: true` 时仍以其为准。未返回的数值显示为未知，查询失败显示错误。
 
-## Active Account
+## 刷新额度与账号资料
 
-Active 账号会作为请求的第一候选。若请求失败，QoderGate 会自动轮转到其他启用账号。
+- **查看限额 / 刷新 / 刷新状态**：查询启用账号的额度，并同步套餐和重置日期。
+- 每行的**刷新**：只更新该账号；结果同步到限额表。
+- **刷新 Token**：更新登录凭据，不等同于查询额度。
 
-## 额度字段
+刷新有旋转图标、额度表闪动、查询完成时间和结果提示。余额未变也会确认查询已完成。
 
 | 字段 | 含义 |
 | --- | --- |
-| `quota` | Qoder 返回的当前额度值。 |
-| `is_quota_exceeded` | 账号是否已经超出额度。 |
-| `plan` | 账号套餐标识。 |
-| `user_tag` | Qoder 返回的展示标签。 |
-| `next_reset_at` | 额度预计重置时间。 |
+| `plan` | Qoder 套餐标识 |
+| `user_tag` | 套餐展示名称，例如 Teams |
+| `next_reset_at` | 上游 `nextResetAt` 时间戳，页面显示为日期 |
+| `quota` | 旧版额度字段，不作为 Credits 余额展示 |
+
+未获取套餐时显示“未获取套餐”，不会默认显示 Trial。资料刷新失败保留上次成功数据。界面的日期按浏览器时区显示。
