@@ -593,6 +593,10 @@ export default function App() {
     return () => { clearInterval(si); clearInterval(li); clearInterval(ri) }
   }, [token, activeTab, fetchStatus, fetchAccounts, fetchApiConfig, fetchLogs, fetchRegStatus, regStatus?.running])
 
+  useEffect(() => {
+    if (token && activeTab === 'accounts') void loadQuota()
+  }, [token, activeTab, loadQuota])
+
   useEffect(() => { if (activeTab === 'logs') logEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs, activeTab])
   useEffect(() => { if (activeTab === 'playground') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages, activeTab])
 
@@ -1027,7 +1031,7 @@ export default function App() {
               <section className="flex justify-between items-end flex-wrap gap-4">
                 <div className="max-w-xl"><p className="text-body text-[16px]">{t.accounts.desc}</p></div>
                 <div className="flex gap-4 flex-wrap">
-                  <button onClick={() => { setShowBatchImport(v => !v); setQuotaList(null) }} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border ${showBatchImport ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
+                  <button onClick={() => { setShowBatchImport(v => !v) }} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border ${showBatchImport ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
                     <span className="material-symbols-outlined text-[18px]">file_upload</span>{lang === 'zh' ? '批量导入' : 'Batch Import'}
                   </button>
                   <button onClick={doRefreshTokens} disabled={refreshingTokens} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-40">
@@ -1062,7 +1066,6 @@ export default function App() {
                 </section>
               )}
 
-              {quotaList && (
                 <section aria-busy={refreshingQuota} className="bg-surface-card border border-hairline rounded-2xl overflow-hidden">
                   <div className="px-6 py-4 border-b border-hairline flex flex-wrap items-center gap-2">
                     <span className="material-symbols-outlined text-[18px] text-body">data_usage</span>
@@ -1076,10 +1079,13 @@ export default function App() {
                       : quotaUpdatedAt ? `${lang === 'zh' ? '查询完成：' : 'Last checked: '}${quotaUpdatedAt}` : ''}
                   </div>
                   <div className={`transition-opacity duration-300 ${refreshingQuota ? 'opacity-50 animate-pulse motion-reduce:animate-none' : 'opacity-100'}`}>
-                    <QuotaTable entries={quotaList} lang={lang} />
+                    {quotaList !== null ? <QuotaTable entries={quotaList} lang={lang} /> : (
+                      <div className="px-6 py-8 text-sm text-body">
+                        {quotaError ? (lang === 'zh' ? '暂未获取到额度，请点击刷新重试。' : 'Quota unavailable. Click Refresh to retry.') : (lang === 'zh' ? '正在加载账号限额…' : 'Loading account quotas…')}
+                      </div>
+                    )}
                   </div>
                 </section>
-              )}
 
               <section className="flex items-center gap-6">
                 <div className="relative flex-grow max-w-md group">
