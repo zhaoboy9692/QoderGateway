@@ -21,6 +21,7 @@ This protects routes such as:
 - `/ui/models`
 - `/ui/accounts/quota`
 - `/ui/accounts/{uid}/refresh`
+- `/ui/accounts/{uid}/remark`
 
 ## External API Keys
 

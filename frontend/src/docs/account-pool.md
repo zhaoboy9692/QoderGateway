@@ -12,6 +12,12 @@ The account pool manages existing Qoder sessions for request routing and account
 
 Accounts are deduplicated by `uid`. Re-importing updates the existing record. Disabled accounts remain in the database but do not participate in routing.
 
+## Editable Remarks
+
+The account table keeps UID as an internal routing identifier but does not display it as a column. The last column contains an optional persistent remark. Click the value or **Add remark** to edit it, press Enter or click Save to submit, and press Escape or click Cancel to discard the draft. An empty value clears the remark; the maximum length is 200 characters.
+
+Account search matches the account name, internal UID, and remark. Re-importing the same UID preserves its existing remark.
+
 ## Active Account and Rotation
 
 The active account handles requests first. Only errors recognized as account-level problems trigger rotation; ordinary upstream failures do not immediately skip an account. Quota errors cause another quota check. Failed checks or incomplete data do not justify rotation.

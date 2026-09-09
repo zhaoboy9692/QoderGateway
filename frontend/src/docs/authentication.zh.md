@@ -21,6 +21,7 @@ X-Gateway-Token: <gateway-token>
 - `/ui/models`
 - `/ui/accounts/quota`
 - `/ui/accounts/{uid}/refresh`
+- `/ui/accounts/{uid}/remark`
 
 ## 外部 API Key
 

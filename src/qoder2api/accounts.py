@@ -104,11 +104,25 @@ async def import_current_auth() -> dict[str, Any]:
 
         conn.execute(
             """
-            INSERT OR REPLACE INTO accounts (
+            INSERT INTO accounts (
                 uid, name, user_type, security_oauth_token, refresh_token, machine_id,
                 enabled, last_status, last_error, quota, is_quota_exceeded, plan,
                 user_tag, next_reset_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(uid) DO UPDATE SET
+                name = excluded.name,
+                user_type = excluded.user_type,
+                security_oauth_token = excluded.security_oauth_token,
+                refresh_token = excluded.refresh_token,
+                machine_id = excluded.machine_id,
+                enabled = excluded.enabled,
+                last_status = excluded.last_status,
+                last_error = excluded.last_error,
+                quota = excluded.quota,
+                is_quota_exceeded = excluded.is_quota_exceeded,
+                plan = excluded.plan,
+                user_tag = excluded.user_tag,
+                next_reset_at = excluded.next_reset_at
             """,
             (
                 uid, name, sess.identity.user_type, sess.identity.security_oauth_token,
@@ -158,10 +172,25 @@ def batch_import_accounts(records: list[dict]) -> dict:
             enabled = existing[0] if existing else 1
             conn.execute(
                 """
-                INSERT OR REPLACE INTO accounts (
+                INSERT INTO accounts (
                     uid, name, user_type, security_oauth_token, refresh_token, machine_id,
                     enabled, last_status, last_error, quota, is_quota_exceeded, plan, user_tag, next_reset_at, token_expires_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', NULL, 0, 0, 'PLAN_TIER_PRO_TRIAL', 'Pro Trial', NULL, ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    name = excluded.name,
+                    user_type = excluded.user_type,
+                    security_oauth_token = excluded.security_oauth_token,
+                    refresh_token = excluded.refresh_token,
+                    machine_id = excluded.machine_id,
+                    enabled = excluded.enabled,
+                    last_status = excluded.last_status,
+                    last_error = excluded.last_error,
+                    quota = excluded.quota,
+                    is_quota_exceeded = excluded.is_quota_exceeded,
+                    plan = excluded.plan,
+                    user_tag = excluded.user_tag,
+                    next_reset_at = excluded.next_reset_at,
+                    token_expires_at = excluded.token_expires_at
                 """,
                 (
                     uid,

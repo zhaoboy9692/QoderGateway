@@ -17,6 +17,7 @@ Inspired by [cubk1/qoder2api](https://github.com/cubk1/qoder2api/). The Python b
 - WebUI with dashboard, account pool, model picker, chat, API keys, and logs.
 - Separate subscription-seat and shared organization credit balances.
 - Bulk and per-account refresh of credits, plan, and reset date, with progress and error feedback.
+- Persistent inline account remarks with search by account name, UID, or remark.
 - Chinese and English documentation with search, navigation, and language switching.
 
 Import existing Qoder sessions, PATs, or account JSON. Automatic registration, standalone registration tools, and their browser dependencies have been removed.

@@ -74,16 +74,19 @@ These endpoints use `X-Gateway-Token: <gateway-token>`:
 | `GET /ui/accounts` | Read stored account metadata |
 | `GET /ui/accounts/quota` | Query enabled accounts' seat/resource credits and synchronize plan/reset metadata |
 | `POST /ui/accounts/{uid}/refresh` | Query one account's credits and metadata |
+| `PATCH /ui/accounts/{uid}/remark` | Save or clear one account's remark with `{ "remark": "..." }` |
 | `POST /ui/accounts/refresh-tokens` | Renew login credentials |
 
 A per-account refresh returns `ok`, `metadata`, and `quota`. Bulk quota queries return `total`, `quotas`, and `metadata`; inspect each entry's `ok` and `error` for partial failures.
+
+The remark endpoint trims surrounding whitespace, accepts an empty string to clear the value, and rejects non-string values or text longer than 200 characters with HTTP 400. It returns `status`, `uid`, and the saved `remark`.
 
 ## Error Responses
 
 | Status | Meaning |
 | --- | --- |
 | `401` | Missing or invalid credential for that endpoint |
-| `400` | No usable account session for chat |
+| `400` | Invalid management input, or no usable account session for chat |
 | `404` | Account requested by management refresh does not exist, or the route does not exist |
 | `502` | Bridge error such as upstream failure, unsupported model, or no valid answer |
 

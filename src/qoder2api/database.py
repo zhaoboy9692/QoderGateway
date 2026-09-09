@@ -77,5 +77,11 @@ def init_db():
         except Exception:
             pass
 
+        # 账号备注列（幂等：已存在则忽略）
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN remark TEXT")
+        except sqlite3.OperationalError:
+            pass
+
 
 init_db()

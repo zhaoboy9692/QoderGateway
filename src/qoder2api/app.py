@@ -91,10 +91,19 @@ async def get_session() -> SessionContext:
                 with get_db() as conn:
                     conn.execute(
                         """
-                        INSERT OR REPLACE INTO accounts (
+                        INSERT INTO accounts (
                             uid, name, user_type, security_oauth_token, refresh_token, machine_id,
                             enabled, last_status, last_error
                         ) VALUES (?, ?, ?, ?, ?, ?, 1, 'ok', NULL)
+                        ON CONFLICT(uid) DO UPDATE SET
+                            name = excluded.name,
+                            user_type = excluded.user_type,
+                            security_oauth_token = excluded.security_oauth_token,
+                            refresh_token = excluded.refresh_token,
+                            machine_id = excluded.machine_id,
+                            enabled = excluded.enabled,
+                            last_status = excluded.last_status,
+                            last_error = excluded.last_error
                         """,
                         (sess.identity.uid, sess.identity.name or "Environment PAT", sess.identity.user_type,
                          sess.identity.security_oauth_token, sess.identity.refresh_token, sess.machine_id)
@@ -237,6 +246,26 @@ async def toggle_account(payload: dict[str, Any], verify: None = Depends(check_g
     return {"status": "ok"}
 
 
+@app.patch("/ui/accounts/{uid}/remark")
+async def update_account_remark(
+    uid: str,
+    payload: dict[str, Any],
+    verify: None = Depends(check_gateway_token),
+) -> dict[str, Any]:
+    remark_value = payload.get("remark")
+    if not isinstance(remark_value, str):
+        raise HTTPException(status_code=400, detail="remark must be a string")
+    remark = remark_value.strip()
+    if len(remark) > 200:
+        raise HTTPException(status_code=400, detail="remark must not exceed 200 characters")
+    with get_db() as conn:
+        result = conn.execute("UPDATE accounts SET remark = ? WHERE uid = ?", (remark, uid))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Account not found")
+    add_log(f"Updated account remark for UID: {uid}")
+    return {"status": "ok", "uid": uid, "remark": remark}
+
+
 @app.post("/ui/accounts/refresh-tokens")
 async def refresh_account_tokens(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
     """手动触发：刷新所有账号的 token（drt- → deviceToken/refresh）。"""
@@ -319,10 +348,19 @@ async def set_session(payload: dict[str, Any], verify: None = Depends(check_gate
         with get_db() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO accounts (
+                INSERT INTO accounts (
                     uid, name, user_type, security_oauth_token, refresh_token, machine_id,
                     enabled, last_status, last_error
                 ) VALUES (?, ?, ?, ?, ?, ?, 1, 'ok', ?)
+                ON CONFLICT(uid) DO UPDATE SET
+                    name = excluded.name,
+                    user_type = excluded.user_type,
+                    security_oauth_token = excluded.security_oauth_token,
+                    refresh_token = excluded.refresh_token,
+                    machine_id = excluded.machine_id,
+                    enabled = excluded.enabled,
+                    last_status = excluded.last_status,
+                    last_error = excluded.last_error
                 """,
                 (sess.identity.uid, sess.identity.name or "PAT Account", sess.identity.user_type,
                  sess.identity.security_oauth_token, sess.identity.refresh_token, sess.machine_id, None)

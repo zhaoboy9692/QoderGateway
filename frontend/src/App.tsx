@@ -15,7 +15,7 @@ interface Account {
   uid: string; name: string; user_type: string; security_oauth_token: string
   refresh_token: string; machine_id: string; enabled: boolean; last_status: string
   last_error: string | null; quota: number; is_quota_exceeded: boolean
-  plan: string | null; user_tag: string | null; next_reset_at: number | null
+  plan: string | null; user_tag: string | null; next_reset_at: number | null; remark: string | null
 }
 interface AccountsConfig { accounts: Account[]; active_uid: string | null }
 interface UIStatus { ready: boolean; mode: string; username: string | null; uid: string | null; user_type: string | null; error: string | null; accounts_count: number }
@@ -280,6 +280,9 @@ export default function App() {
   const quotaRequestRef = useRef(false)
   const [quotaUpdatedAt, setQuotaUpdatedAt] = useState<string | null>(null)
   const [quotaError, setQuotaError] = useState('')
+  const [editingRemarkUid, setEditingRemarkUid] = useState<string | null>(null)
+  const [remarkDraft, setRemarkDraft] = useState('')
+  const [savingRemarkUid, setSavingRemarkUid] = useState<string | null>(null)
 
   const [logFilterAccount, setLogFilterAccount] = useState('all')
   const [logFilterStatus, setLogFilterStatus] = useState('all')
@@ -607,6 +610,47 @@ export default function App() {
       pushToast('INFO', lang === 'zh' ? '账号已更新' : 'Account Updated', msg.updated(enabled))
       fetchAccounts(); fetchStatus()
     } catch (err: any) { pushToast('ERROR', msg.toggleFailed, err.message) }
+  }
+
+  const startEditingRemark = (account: Account) => {
+    if (savingRemarkUid) return
+    setEditingRemarkUid(account.uid)
+    setRemarkDraft(account.remark || '')
+  }
+
+  const cancelEditingRemark = () => {
+    setEditingRemarkUid(null)
+    setRemarkDraft('')
+  }
+
+  const handleSaveRemark = async (uid: string) => {
+    if (savingRemarkUid) return
+    const remark = remarkDraft.trim()
+    if (remark.length > 200) {
+      pushToast('ERROR', lang === 'zh' ? '备注保存失败' : 'Remark Save Failed', lang === 'zh' ? '备注不能超过 200 个字符' : 'A remark cannot exceed 200 characters')
+      return
+    }
+    setSavingRemarkUid(uid)
+    try {
+      const resp = await authedFetch(`/ui/accounts/${encodeURIComponent(uid)}/remark`, {
+        method: 'PATCH',
+        signal: AbortSignal.timeout(15000),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remark }),
+      })
+      const data = await resp.json()
+      if (!resp.ok) throw new Error(data.detail || (lang === 'zh' ? '备注保存失败' : 'Remark save failed'))
+      setAccountsConfig(prev => ({
+        ...prev,
+        accounts: prev.accounts.map(account => account.uid === uid ? { ...account, remark: data.remark } : account),
+      }))
+      cancelEditingRemark()
+      pushToast('SUCCESS', lang === 'zh' ? '备注已保存' : 'Remark Saved', data.remark || (lang === 'zh' ? '备注已清空' : 'Remark cleared'))
+    } catch (error) {
+      pushToast('ERROR', lang === 'zh' ? '备注保存失败' : 'Remark Save Failed', error instanceof Error ? error.message : String(error))
+    } finally {
+      setSavingRemarkUid(null)
+    }
   }
 
   const handleDeleteAccount = async (uid: string) => {
@@ -1010,21 +1054,31 @@ export default function App() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
                     <thead className="bg-canvas-soft border-b border-hairline">
-                      <tr>{['Account', 'UID', 'Plan / Quota', 'Status', 'Reset', 'Enabled', 'Actions'].map((h, i) => (
-                        <th key={i} className={`px-6 py-4 text-[10px] font-semibold text-body uppercase tracking-wider ${i === 5 ? 'text-center' : ''}`}>{h}</th>
+                      <tr>{[
+                        lang === 'zh' ? '账号' : 'Account',
+                        lang === 'zh' ? '套餐 / 额度' : 'Plan / Quota',
+                        lang === 'zh' ? '状态' : 'Status',
+                        lang === 'zh' ? '重置' : 'Reset',
+                        lang === 'zh' ? '启用' : 'Enabled',
+                        lang === 'zh' ? '操作' : 'Actions',
+                        lang === 'zh' ? '备注' : 'Remark',
+                      ].map((h, i) => (
+                        <th key={i} className={`px-6 py-4 text-[10px] font-semibold text-body uppercase tracking-wider ${i === 4 ? 'text-center' : ''}`}>{h}</th>
                       ))}</tr>
                     </thead>
                     <tbody className="divide-y divide-hairline">
                       {accountsConfig.accounts.length === 0 ? (
                         <tr><td colSpan={7} className="py-8 text-center text-xs text-body font-medium">{t.accounts.empty}</td></tr>
                       ) : accountsConfig.accounts
-                        .filter(acc => !searchAccounts || acc.name.toLowerCase().includes(searchAccounts.toLowerCase()) || acc.uid.includes(searchAccounts))
+                        .filter(acc => {
+                          const query = searchAccounts.toLowerCase()
+                          return !query || acc.name.toLowerCase().includes(query) || acc.uid.toLowerCase().includes(query) || (acc.remark || '').toLowerCase().includes(query)
+                        })
                         .map((acc) => {
                           const isActive = accountsConfig.active_uid === acc.uid
                           return (
                             <tr key={acc.uid} className={`hover:bg-canvas-soft transition-colors group ${isActive ? 'bg-mint/5' : ''}`}>
                               <td className="px-6 py-5 font-bold text-ink"><div className="flex items-center gap-2">{acc.name}{isActive && <span className="text-[9px] bg-mint/20 text-ink px-1.5 py-0.5 rounded font-extrabold uppercase">Active</span>}</div></td>
-                              <td className="px-6 py-5 font-mono text-xs text-body select-all">{acc.uid}</td>
                               <td className="px-6 py-5"><div className="flex flex-col gap-1"><span className="text-xs font-semibold text-ink">{acc.user_tag === 'Teams' && lang === 'zh' ? 'Teams（团队版）' : acc.user_tag || acc.plan || (lang === 'zh' ? '未获取套餐' : 'Plan not fetched')}</span><span className="text-[10px] text-body">{lang === 'zh' ? 'Credits 额度见上方限额表' : 'See credits in the quota table above'}</span></div></td>
                               <td className="px-6 py-5">
                                 {acc.is_quota_exceeded ? <span className="px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider bg-red-100 text-red-700">Exceeded</span>
@@ -1046,6 +1100,38 @@ export default function App() {
                                   <button onClick={() => handleSelectAccount(acc.uid)} disabled={isActive || !acc.enabled} className="text-body hover:text-ink disabled:opacity-30" title="Activate"><span className="material-symbols-outlined">play_circle</span></button>
                                   <button onClick={() => handleDeleteAccount(acc.uid)} className="text-body hover:text-red-600" title="Delete"><span className="material-symbols-outlined">delete</span></button>
                                 </div>
+                              </td>
+                              <td className="px-6 py-5 min-w-64">
+                                {editingRemarkUid === acc.uid ? (
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      autoFocus
+                                      value={remarkDraft}
+                                      maxLength={200}
+                                      disabled={savingRemarkUid === acc.uid}
+                                      onChange={event => setRemarkDraft(event.target.value)}
+                                      onKeyDown={event => {
+                                        if (event.nativeEvent.isComposing || savingRemarkUid) return
+                                        if (event.key === 'Enter') { event.preventDefault(); handleSaveRemark(acc.uid) }
+                                        if (event.key === 'Escape') { event.preventDefault(); cancelEditingRemark() }
+                                      }}
+                                      placeholder={lang === 'zh' ? '输入备注' : 'Enter remark'}
+                                      aria-label={lang === 'zh' ? `编辑 ${acc.name} 的备注` : `Edit remark for ${acc.name}`}
+                                      className="w-full min-w-36 px-3 py-2 text-xs border border-hairline rounded-lg bg-white text-ink focus:outline-none focus:ring-2 focus:ring-mint disabled:opacity-50"
+                                    />
+                                    <button onClick={() => handleSaveRemark(acc.uid)} disabled={savingRemarkUid === acc.uid} className="text-emerald-700 hover:text-emerald-900 disabled:opacity-40" title={lang === 'zh' ? '保存' : 'Save'} aria-label={lang === 'zh' ? '保存备注' : 'Save remark'}>
+                                      <span className={`material-symbols-outlined text-[19px] ${savingRemarkUid === acc.uid ? 'animate-pulse' : ''}`}>check</span>
+                                    </button>
+                                    <button onClick={cancelEditingRemark} disabled={savingRemarkUid === acc.uid} className="text-body hover:text-ink disabled:opacity-40" title={lang === 'zh' ? '取消' : 'Cancel'} aria-label={lang === 'zh' ? '取消编辑备注' : 'Cancel remark editing'}>
+                                      <span className="material-symbols-outlined text-[19px]">close</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button onClick={() => startEditingRemark(acc)} className="group/remark flex items-center gap-2 max-w-72 text-left text-xs text-body hover:text-ink" title={lang === 'zh' ? '点击编辑备注' : 'Click to edit remark'}>
+                                    <span className={acc.remark ? 'text-ink break-words' : 'italic'}>{acc.remark || (lang === 'zh' ? '添加备注' : 'Add remark')}</span>
+                                    <span className="material-symbols-outlined text-[16px] opacity-0 group-hover/remark:opacity-100 transition-opacity">edit</span>
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           )

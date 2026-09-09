@@ -74,16 +74,19 @@ curl -N http://127.0.0.1:5050/v1/chat/completions \
 | `GET /ui/accounts` | 读取已保存的账号资料 |
 | `GET /ui/accounts/quota` | 查询启用账号的订阅席位、资源包，并同步套餐与重置日期 |
 | `POST /ui/accounts/{uid}/refresh` | 查询单个账号的额度与资料 |
+| `PATCH /ui/accounts/{uid}/remark` | 使用 `{ "remark": "..." }` 保存或清空单个账号备注 |
 | `POST /ui/accounts/refresh-tokens` | 刷新登录凭据 |
 
 单账号刷新响应包含 `ok`、`metadata`、`quota`。全量额度查询返回 `total`、`quotas`、`metadata`，部分账号失败可通过各条目的 `ok` 和 `error` 判断。
+
+备注接口会去除首尾空白，允许用空字符串清空备注；非字符串或超过 200 个字符时返回 HTTP 400。成功响应包含 `status`、`uid` 和保存后的 `remark`。
 
 ## 错误响应
 
 | 状态码 | 含义 |
 | --- | --- |
 | `401` | 缺少或无效的对应接口密钥 |
-| `400` | 对话请求没有可用的账号会话 |
+| `400` | 管理参数无效，或对话请求没有可用的账号会话 |
 | `404` | 管理刷新指定的账号不存在，或路径不存在 |
 | `502` | 上游失败、模型不支持或没有产生有效回答等桥接错误 |
 
