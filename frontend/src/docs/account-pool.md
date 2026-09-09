@@ -24,7 +24,7 @@ The active account handles requests first. Only errors recognized as account-lev
 
 ## Credits Shown by Default
 
-Opening Account Pool displays and loads the quota table automatically.
+The first visit to Account Pool loads the quota table automatically. Switching tabs or clicking Quota reuses the current page session's results, including any error state. Use Refresh to query again. Reloading the browser page starts a new session and loads once again.
 
 | Data | Meaning |
 | --- | --- |
@@ -37,7 +37,8 @@ An organization resource package may be shared by multiple accounts; do not sum 
 
 ## Refresh Credits and Metadata
 
-- **Quota / Refresh / Refresh Status** query enabled accounts and synchronize plan/reset metadata.
+- **Quota** scrolls to the existing quota table without querying upstream.
+- **Refresh / Refresh Status** query enabled accounts and synchronize plan/reset metadata.
 - Each row's **Refresh** updates only that account and its quota-table entry.
 - **Refresh Tokens** renews credentials; it is separate from querying quotas.
 

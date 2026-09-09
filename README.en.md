@@ -78,9 +78,9 @@ The default address is `http://127.0.0.1:5050/`; host and port can be configured
 
 ### Credits, plans, and refresh
 
-Open **Account Pool**. The credits panel is always visible and loads automatically. Loading and failure states remain visible without hiding the panel.
+Credits load automatically on the first visit to **Account Pool**. Switching tabs or clicking **Quota** reuses the current page session's results. Reloading the browser page triggers one new automatic load.
 
-- **Quota / Refresh / Refresh Status** query enabled accounts and synchronize their plans and reset dates.
+- **Quota** scrolls to the credits panel. **Refresh / Refresh Status** query enabled accounts again and synchronize their plans and reset dates.
 - The **Refresh** button on each account updates only that account.
 - **Refresh Tokens** renews login credentials; it is separate from quota and plan queries.
 

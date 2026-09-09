@@ -278,6 +278,8 @@ export default function App() {
   const [refreshingQuota, setRefreshingQuota] = useState(false)
   const [refreshingAccount, setRefreshingAccount] = useState<string | null>(null)
   const quotaRequestRef = useRef(false)
+  const quotaAutoLoadRef = useRef(false)
+  const quotaPanelRef = useRef<HTMLElement>(null)
   const [quotaUpdatedAt, setQuotaUpdatedAt] = useState<string | null>(null)
   const [quotaError, setQuotaError] = useState('')
   const [editingRemarkUid, setEditingRemarkUid] = useState<string | null>(null)
@@ -505,7 +507,10 @@ export default function App() {
   }, [token, activeTab, fetchStatus, fetchAccounts, fetchApiConfig, fetchLogs])
 
   useEffect(() => {
-    if (token && activeTab === 'accounts') void loadQuota()
+    if (token && activeTab === 'accounts' && !quotaAutoLoadRef.current) {
+      quotaAutoLoadRef.current = true
+      void loadQuota()
+    }
   }, [token, activeTab, loadQuota])
 
   useEffect(() => {
@@ -993,7 +998,7 @@ export default function App() {
                   <button onClick={doRefreshTokens} disabled={refreshingTokens} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-40">
                     <span className="material-symbols-outlined text-[18px]">autorenew</span>{refreshingTokens ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新 Token' : 'Refresh Tokens')}
                   </button>
-                  <button onClick={() => { loadQuota(); setShowBatchImport(false) }} disabled={refreshingQuota || !!refreshingAccount} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border disabled:opacity-50 ${quotaList ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
+                  <button onClick={() => { setShowBatchImport(false); quotaPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} disabled={refreshingQuota || !!refreshingAccount} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border disabled:opacity-50 ${quotaList ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
                     {refreshingQuota ? <RefreshCw size={18} className="animate-spin" aria-hidden="true" /> : <span className="material-symbols-outlined text-[18px]">data_usage</span>}{refreshingQuota ? (lang === 'zh' ? '查询中...' : 'Loading...') : (lang === 'zh' ? '查看限额' : 'Quota')}
                   </button>
                   <button onClick={handleRefreshStatus} disabled={refreshingQuota || !!refreshingAccount} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-50">
@@ -1022,7 +1027,7 @@ export default function App() {
                 </section>
               )}
 
-                <section aria-busy={refreshingQuota} className="bg-surface-card border border-hairline rounded-2xl overflow-hidden">
+                <section ref={quotaPanelRef} aria-busy={refreshingQuota} className="bg-surface-card border border-hairline rounded-2xl overflow-hidden">
                   <div className="px-6 py-4 border-b border-hairline flex flex-wrap items-center gap-2">
                     <span className="material-symbols-outlined text-[18px] text-body">data_usage</span>
                     <span className="text-sm font-semibold text-ink">{lang === 'zh' ? '账号限额（credits）' : 'Account Quota (credits)'}</span>
