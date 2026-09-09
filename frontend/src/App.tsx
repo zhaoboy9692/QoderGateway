@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { gsap } from 'gsap'
+import { RefreshCw, CheckCircle2 } from 'lucide-react'
 import { QuotaTable } from './QuotaTable'
 import type { AccountQuota } from './quota'
 
@@ -346,6 +347,11 @@ export default function App() {
   const [batchJson, setBatchJson] = useState('')
   const [refreshingTokens, setRefreshingTokens] = useState(false)
   const [quotaList, setQuotaList] = useState<AccountQuota[] | null>(null)
+  const [refreshingQuota, setRefreshingQuota] = useState(false)
+  const [refreshingAccount, setRefreshingAccount] = useState<string | null>(null)
+  const quotaRequestRef = useRef(false)
+  const [quotaUpdatedAt, setQuotaUpdatedAt] = useState<string | null>(null)
+  const [quotaError, setQuotaError] = useState('')
 
   const [logFilterAccount, setLogFilterAccount] = useState('all')
   const [logFilterStatus, setLogFilterStatus] = useState('all')
@@ -478,13 +484,66 @@ export default function App() {
   }, [authedFetch, lang, pushToast])
 
   const loadQuota = useCallback(async () => {
+    if (quotaRequestRef.current) return
+    quotaRequestRef.current = true
+    setRefreshingQuota(true)
+    setQuotaError('')
     try {
-      const resp = await authedFetch('/ui/accounts/quota')
+      const resp = await authedFetch('/ui/accounts/quota', { cache: 'no-store', signal: AbortSignal.timeout(60000) })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
-      setQuotaList(data.quotas || [])
-    } catch { pushToast('ERROR', lang === 'zh' ? '限额查询失败' : 'Quota query failed', '') }
-  }, [authedFetch, lang, pushToast])
+      if (!Array.isArray(data.quotas)) throw new Error(lang === 'zh' ? '额度响应格式异常' : 'Invalid quota response')
+      setQuotaList(data.quotas)
+      await fetchAccounts()
+      setQuotaUpdatedAt(new Date().toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }))
+      const failed = data.quotas.filter((q: AccountQuota) => !q.ok || !q.quota).length
+      const metadataFailed = (data.metadata || []).filter((r: { ok: boolean }) => !r.ok).length
+      if (failed || metadataFailed) {
+        const message = lang === 'zh' ? `额度查询失败 ${failed} 个，套餐/重置日期查询失败 ${metadataFailed} 个` : `Quota failures: ${failed}; plan/reset failures: ${metadataFailed}`
+        setQuotaError(message)
+        pushToast('ERROR', lang === 'zh' ? '额度刷新部分失败' : 'Quota refresh incomplete', message)
+      } else {
+        pushToast('SUCCESS', lang === 'zh' ? '额度已刷新' : 'Quota refreshed', lang === 'zh' ? '已重新查询上游；数值相同表示上游返回的额度未变化。' : 'Queried upstream again; unchanged values mean the returned balances are unchanged.')
+      }
+    } catch (error) {
+      const message = error instanceof Error && error.name === 'TimeoutError'
+        ? (lang === 'zh' ? '查询超时，请稍后重试' : 'Request timed out; retry later')
+        : error instanceof Error ? error.message : String(error)
+      setQuotaError(message)
+      pushToast('ERROR', lang === 'zh' ? '限额查询失败' : 'Quota query failed', message)
+    } finally {
+      quotaRequestRef.current = false
+      setRefreshingQuota(false)
+    }
+  }, [authedFetch, lang, pushToast, fetchAccounts])
+
+  const refreshAccount = useCallback(async (uid: string) => {
+    if (quotaRequestRef.current) return
+    quotaRequestRef.current = true
+    setRefreshingAccount(uid)
+    setQuotaError('')
+    try {
+      const resp = await authedFetch(`/ui/accounts/${encodeURIComponent(uid)}/refresh`, { method: 'POST', signal: AbortSignal.timeout(45000) })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      await fetchAccounts()
+      if (data.quota) {
+        setQuotaList(prev => prev?.some(q => q.uid === uid)
+          ? prev.map(q => q.uid === uid ? data.quota : q)
+          : [...(prev || []), data.quota])
+      }
+      if (!data.ok) throw new Error([data.metadata?.error, data.quota?.error].filter(Boolean).join('; ') || (lang === 'zh' ? '部分数据刷新失败' : 'Refresh incomplete'))
+      setQuotaUpdatedAt(new Date().toLocaleTimeString(lang === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }))
+      pushToast('SUCCESS', lang === 'zh' ? '账号已刷新' : 'Account refreshed', lang === 'zh' ? '额度、套餐和重置日期已重新查询' : 'Quota, plan and reset date checked')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setQuotaError(message)
+      pushToast('ERROR', lang === 'zh' ? '账号刷新失败' : 'Account refresh failed', message)
+    } finally {
+      quotaRequestRef.current = false
+      setRefreshingAccount(null)
+    }
+  }, [authedFetch, lang, pushToast, fetchAccounts])
 
   const fetchLogs = useCallback(async () => {
     try { const resp = await authedFetch('/ui/logs'); const data = await resp.json(); setLogs(data) } catch { /* */ }
@@ -685,8 +744,7 @@ export default function App() {
   }
 
   const handleRefreshStatus = () => {
-    fetchAccounts(); fetchStatus(); fetchLogs()
-    pushToast('INFO', msg.refreshed, lang === 'zh' ? '账号池和系统状态已更新' : 'Account pool and system status updated')
+    loadQuota(); fetchStatus(); fetchLogs()
   }
 
   const handleSendChat = async (e: React.FormEvent) => {
@@ -975,11 +1033,11 @@ export default function App() {
                   <button onClick={doRefreshTokens} disabled={refreshingTokens} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-40">
                     <span className="material-symbols-outlined text-[18px]">autorenew</span>{refreshingTokens ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新 Token' : 'Refresh Tokens')}
                   </button>
-                  <button onClick={() => { loadQuota(); setShowBatchImport(false) }} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border ${quotaList ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
-                    <span className="material-symbols-outlined text-[18px]">data_usage</span>{lang === 'zh' ? '查看限额' : 'Quota'}
+                  <button onClick={() => { loadQuota(); setShowBatchImport(false) }} disabled={refreshingQuota || !!refreshingAccount} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border disabled:opacity-50 ${quotaList ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
+                    {refreshingQuota ? <RefreshCw size={18} className="animate-spin" aria-hidden="true" /> : <span className="material-symbols-outlined text-[18px]">data_usage</span>}{refreshingQuota ? (lang === 'zh' ? '查询中...' : 'Loading...') : (lang === 'zh' ? '查看限额' : 'Quota')}
                   </button>
-                  <button onClick={handleRefreshStatus} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm">
-                    <span className="material-symbols-outlined text-[18px]">refresh</span>{t.accounts.refreshStatus}
+                  <button onClick={handleRefreshStatus} disabled={refreshingQuota || !!refreshingAccount} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-50">
+                    <RefreshCw size={18} className={refreshingQuota ? 'animate-spin' : ''} aria-hidden="true" />{refreshingQuota ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : t.accounts.refreshStatus}
                   </button>
                   <button onClick={handleImportAuth} className="flex items-center gap-2 px-6 py-2.5 bg-ink text-white rounded-lg hover:bg-neutral-800 transition-all font-bold text-sm shadow-md">
                     <span className="material-symbols-outlined text-[18px]">add</span>{t.accounts.importAccounts}
@@ -1005,13 +1063,21 @@ export default function App() {
               )}
 
               {quotaList && (
-                <section className="bg-surface-card border border-hairline rounded-2xl overflow-hidden">
-                  <div className="px-6 py-4 border-b border-hairline flex items-center gap-2">
+                <section aria-busy={refreshingQuota} className="bg-surface-card border border-hairline rounded-2xl overflow-hidden">
+                  <div className="px-6 py-4 border-b border-hairline flex flex-wrap items-center gap-2">
                     <span className="material-symbols-outlined text-[18px] text-body">data_usage</span>
                     <span className="text-sm font-semibold text-ink">{lang === 'zh' ? '账号限额（credits）' : 'Account Quota (credits)'}</span>
-                    <button onClick={loadQuota} className="ml-auto text-[12px] text-body hover:text-ink flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">refresh</span>{lang === 'zh' ? '刷新' : 'Refresh'}</button>
+                    <button onClick={loadQuota} disabled={refreshingQuota || !!refreshingAccount} className="ml-auto text-[12px] text-body hover:text-ink flex items-center gap-1 disabled:opacity-50"><RefreshCw size={14} className={refreshingQuota ? 'animate-spin' : ''} aria-hidden="true" />{refreshingQuota ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新' : 'Refresh')}</button>
                   </div>
-                  <QuotaTable entries={quotaList} lang={lang} />
+                  <div role="status" aria-live="polite" className={`px-6 py-3 text-xs flex items-center gap-2 transition-colors ${quotaError ? 'text-red-600' : refreshingQuota ? 'bg-mint/10 text-ink' : 'text-body'}`}>
+                    {refreshingQuota ? <RefreshCw size={16} className="animate-spin shrink-0" aria-hidden="true" /> : !quotaError && quotaUpdatedAt ? <CheckCircle2 size={16} className="text-emerald-600 shrink-0" aria-hidden="true" /> : null}
+                    {refreshingQuota ? (lang === 'zh' ? '正在向 Qoder 查询最新额度…' : 'Querying Qoder for current balances…')
+                      : quotaError ? `${lang === 'zh' ? '刷新失败或不完整：' : 'Refresh failed or incomplete: '}${quotaError}`
+                      : quotaUpdatedAt ? `${lang === 'zh' ? '查询完成：' : 'Last checked: '}${quotaUpdatedAt}` : ''}
+                  </div>
+                  <div className={`transition-opacity duration-300 ${refreshingQuota ? 'opacity-50 animate-pulse motion-reduce:animate-none' : 'opacity-100'}`}>
+                    <QuotaTable entries={quotaList} lang={lang} />
+                  </div>
                 </section>
               )}
 
@@ -1041,20 +1107,24 @@ export default function App() {
                             <tr key={acc.uid} className={`hover:bg-canvas-soft transition-colors group ${isActive ? 'bg-mint/5' : ''}`}>
                               <td className="px-6 py-5 font-bold text-ink"><div className="flex items-center gap-2">{acc.name}{isActive && <span className="text-[9px] bg-mint/20 text-ink px-1.5 py-0.5 rounded font-extrabold uppercase">Active</span>}</div></td>
                               <td className="px-6 py-5 font-mono text-xs text-body select-all">{acc.uid}</td>
-                              <td className="px-6 py-5"><div className="flex flex-col"><span className="text-xs font-semibold text-ink">{acc.user_tag || acc.plan || 'Trial'}</span><span className="text-[10px] text-body font-mono">Quota: {acc.quota}</span></div></td>
+                              <td className="px-6 py-5"><div className="flex flex-col gap-1"><span className="text-xs font-semibold text-ink">{acc.user_tag === 'Teams' && lang === 'zh' ? 'Teams（团队版）' : acc.user_tag || acc.plan || (lang === 'zh' ? '未获取套餐' : 'Plan not fetched')}</span><span className="text-[10px] text-body">{lang === 'zh' ? 'Credits 额度见上方限额表' : 'See credits in the quota table above'}</span></div></td>
                               <td className="px-6 py-5">
                                 {acc.is_quota_exceeded ? <span className="px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider bg-red-100 text-red-700">Exceeded</span>
                                 : acc.last_status === 'ok' ? <span className="px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider bg-mint/20 text-ink">Enabled</span>
                                 : <span className="px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider bg-red-100 text-red-700" title={acc.last_error || ''}>Error</span>}
                               </td>
-                              <td className="px-6 py-5 text-xs font-mono text-body">{acc.next_reset_at ? new Date(acc.next_reset_at).toLocaleDateString() : '--'}</td>
+                              <td className="px-6 py-5 text-xs font-mono text-body">{acc.next_reset_at ? new Date(acc.next_reset_at).toLocaleDateString() : (lang === 'zh' ? '未获取' : 'Unknown')}</td>
                               <td className="px-6 py-5 text-center">
                                 <button onClick={() => handleToggleAccount(acc.uid, !acc.enabled)} className={`w-11 h-6 rounded-full p-0.5 transition-colors relative ${acc.enabled ? 'bg-ink' : 'bg-hairline-strong'}`}>
                                   <div className={`w-5 h-5 bg-white rounded-full transition-transform duration-200 ${acc.enabled ? 'translate-x-5' : 'translate-x-0'}`}></div>
                                 </button>
                               </td>
                               <td className="px-6 py-5 text-right">
-                                <div className="flex items-center justify-end gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center justify-end gap-4">
+                                  <button onClick={() => refreshAccount(acc.uid)} disabled={refreshingQuota || !!refreshingAccount} className="text-body hover:text-ink disabled:opacity-50 flex items-center gap-1 text-xs whitespace-nowrap" title={lang === 'zh' ? '刷新此账号的额度、套餐和重置日期' : 'Refresh this account’s quota, plan and reset date'}>
+                                    <RefreshCw size={16} className={refreshingAccount === acc.uid ? 'animate-spin' : ''} aria-hidden="true" />
+                                    {refreshingAccount === acc.uid ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新' : 'Refresh')}
+                                  </button>
                                   <button onClick={() => handleSelectAccount(acc.uid)} disabled={isActive || !acc.enabled} className="text-body hover:text-ink disabled:opacity-30" title="Activate"><span className="material-symbols-outlined">play_circle</span></button>
                                   <button onClick={() => handleDeleteAccount(acc.uid)} className="text-body hover:text-red-600" title="Delete"><span className="material-symbols-outlined">delete</span></button>
                                 </div>

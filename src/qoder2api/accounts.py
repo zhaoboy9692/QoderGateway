@@ -41,6 +41,32 @@ def db_load_accounts() -> dict[str, Any]:
         return {"accounts": accounts, "active_uid": active_uid}
 
 
+async def refresh_account_metadata(uid: str) -> dict[str, Any]:
+    """Refresh stored plan/reset metadata without replacing account credentials."""
+    with get_db() as conn:
+        row = conn.execute("SELECT uid, machine_id FROM accounts WHERE uid = ?", (uid,)).fetchone()
+    if not row:
+        return {"ok": False, "uid": uid, "error": "账号不存在"}
+    try:
+        _, machine_token, machine_type = new_machine()
+        status = await fetch_user_status(uid, row["machine_id"], machine_token, machine_type)
+        updates = {}
+        for source, target in (("plan", "plan"), ("userTag", "user_tag"), ("nextResetAt", "next_reset_at")):
+            if source in status:
+                updates[target] = status[source]
+        if not updates:
+            return {"ok": False, "uid": uid, "error": "上游未返回套餐或重置日期"}
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE accounts SET " + ", ".join(f"{key} = ?" for key in updates) + " WHERE uid = ?",
+                (*updates.values(), uid),
+            )
+        return {"ok": True, "uid": uid}
+    except Exception as exc:
+        # Keep the last successful metadata; don't reset it to trial/unknown.
+        return {"ok": False, "uid": uid, "error": f"账号资料查询失败 ({type(exc).__name__})"}
+
+
 async def import_current_auth() -> dict[str, Any]:
     """Decrypts current local auth files, queries quota status, and saves to SQLite."""
     sess = load_local_session()

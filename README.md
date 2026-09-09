@@ -31,6 +31,8 @@ Special thanks to the [LINUX DO](https://linux.do) community for the platform of
 - **两层鉴权** — 管理后台密钥与外部 API Key 分开配置
 - **SQLite 持久化** — 账号、API Key、全局配置全部存入本地数据库
 - **WebUI 控制台** — Dashboard、账号管理、API Key 管理、Playground、服务日志
+- **Credits 额度明细** — 分别显示订阅席位与组织资源包的总额、已用、剩余和使用率
+- **账号资料刷新** — 支持全量/单账号刷新额度、真实套餐和重置日期，提供加载动画、完成时间与错误提示
 - **独立文档站** — `/documents` 提供中英文 Wiki，支持本地搜索和目录跳转
 - **自动检测语言** — 根据浏览器地区自动切换中文/英文
 
@@ -39,7 +41,7 @@ Special thanks to the [LINUX DO](https://linux.do) community for the platform of
 ### 安装 / Install
 
 ```bash
-git clone https://github.com/bzym2/QoderGateway.git
+git clone https://github.com/zhaoboy9692/QoderGateway.git
 cd QoderGateway
 uv sync
 ```
@@ -75,6 +77,12 @@ QODER_ADMIN_PASSWORD=your-strong-password
 uv run qoder2api
 ```
 
+服务器后台运行：
+
+```bash
+nohup uv run qoder2api >>nohup.out 2>&1 &
+```
+
 服务默认运行在 `http://127.0.0.1:5050/`。
 
 | 路径 | 说明 |
@@ -83,6 +91,35 @@ uv run qoder2api
 | `/console` | 管理控制台 |
 | `/documents` | 文档站 / Wiki |
 | `/v1/chat/completions` | OpenAI 兼容 API |
+| `/v1/models` | 模型列表，使用与对话接口相同的 API Key 鉴权 |
+
+### 账号额度、套餐与刷新
+
+进入 `/console` → **账号池**：
+
+- **查看限额 / 限额表的刷新 / 刷新状态**：重新查询启用账号的额度，并同步套餐与重置日期。
+- **每个账号右侧的刷新**：只查询该账号，更新其额度、套餐和 `RESET` 日期。
+- **刷新 Token**：更新登录凭据，与额度及套餐查询是不同操作。
+
+查询期间显示旋转图标；额度表刷新时淡化闪动。完成后显示查询时间和提示，
+上游数值未变时余额保持原值。请求失败会显示错误，不把失败当作零额度。
+
+订阅席位读取 `userQuota`，组织资源包读取 `orgResourcePackage`。
+组织资源包可能被多个账号共享，不能把同一组织各账号显示的余额重复相加。
+席位用完但可用资源包仍有余额时，不再仅凭席位余额将账号判定为额度耗尽。
+
+套餐和 `RESET` 从 Qoder 用户状态接口的 `plan`、`userTag`、`nextResetAt` 同步。
+没有保存套餐时显示“未获取套餐”，不会猜测为 Trial；同步失败保留上次资料。
+旧账号字段 `quota` 不等同于 Credits，实际余额以上方额度明细表为准。
+
+管理接口均需 `X-Gateway-Token`：
+
+| 接口 | 说明 |
+|------|------|
+| `GET /ui/accounts/quota` | 查询启用账号的额度，同时同步套餐与重置日期 |
+| `POST /ui/accounts/{uid}/refresh` | 刷新指定账号的额度、套餐与重置日期 |
+
+更多模型、图片输入及 NewAPI 兼容说明见 [桥接兼容文档](docs/bridge-compatibility.md)。
 
 ### 第一次 API 调用 / First API Call
 

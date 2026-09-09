@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 import collections
 import json
 import os
@@ -24,6 +25,7 @@ from .accounts import (
     get_active_session,
     rotate_next_account,
     batch_import_accounts,
+    refresh_account_metadata,
 )
 from .registrar import get_registrar_status, start_registration, stop_registration
 from .tokens import (
@@ -247,7 +249,24 @@ async def refresh_account_tokens(verify: None = Depends(check_gateway_token)) ->
 @app.get("/ui/accounts/quota")
 async def accounts_quota(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
     """查看所有启用账号的限额（GET /api/v2/quota/usage）。"""
-    return get_all_accounts_quota()
+    result = await asyncio.to_thread(get_all_accounts_quota)
+    limit = asyncio.Semaphore(4)
+    async def refresh(uid: str):
+        async with limit:
+            return await refresh_account_metadata(uid)
+    result["metadata"] = await asyncio.gather(*(refresh(q["uid"]) for q in result["quotas"]))
+    return result
+
+
+@app.post("/ui/accounts/{uid}/refresh")
+async def refresh_account(uid: str, verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM accounts WHERE uid = ?", (uid,)).fetchone():
+            raise HTTPException(status_code=404, detail="Account not found")
+    metadata, quota = await asyncio.gather(
+        refresh_account_metadata(uid), asyncio.to_thread(get_account_quota, uid),
+    )
+    return {"ok": metadata["ok"] and quota["ok"], "metadata": metadata, "quota": quota}
 
 
 @app.delete("/ui/accounts/{uid}")

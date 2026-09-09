@@ -85,6 +85,14 @@ seat alone does not exhaust an account while an available package still has
 credits. The upstream `isQuotaExceeded: true` flag remains authoritative, and
 incomplete balance data does not trigger rotation.
 
+Quota refresh shows an in-flight animation, query completion time, and errors.
+Both the quota refresh and account-status refresh also synchronize `plan`,
+`userTag`, and `nextResetAt` from the Qoder user-status endpoint. The per-account
+refresh button calls authenticated `POST /ui/accounts/{uid}/refresh` to update
+only that account. Failed metadata queries preserve the last saved values;
+accounts without a known plan no longer display a guessed Trial plan. The legacy
+account `quota` field is not shown as Credits; use the separate credit-pool table.
+
 Frontend quota tests (Node.js 22.6 or later):
 
 ```sh
