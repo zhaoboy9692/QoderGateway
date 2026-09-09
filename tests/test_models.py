@@ -4,6 +4,19 @@ from fastapi.testclient import TestClient
 from qoder2api import app as gateway
 
 class ModelListTests(unittest.TestCase):
+    def test_console_catalog_requires_admin_token_and_preserves_name_mapping(self):
+        catalog = {'custom-model-code': {'display_name': 'Custom Model', 'internal_field': 'private'}}
+        with patch.object(gateway, 'load_config', return_value={'gateway_token': 'admin-test', 'auth_required': True, 'allowed_keys': ['client-test']}), \
+             patch.object(gateway, 'MODEL_CATALOG', catalog):
+            client = TestClient(gateway.app)
+            self.assertEqual(client.get('/ui/models').status_code, 401)
+            self.assertEqual(client.get('/ui/models', headers={'Authorization': 'Bearer client-test'}).status_code, 401)
+            response = client.get('/ui/models', headers={'X-Gateway-Token': 'admin-test'})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['data'], [{'id': 'custom-model-code', 'name': 'Custom Model', 'object': 'model', 'created': 0, 'owned_by': 'qoder'}])
+            public = client.get('/v1/models', headers={'Authorization': 'Bearer client-test'})
+            self.assertEqual(response.json(), public.json())
+
     def test_requires_same_api_key_as_completions(self):
         with patch.object(gateway, 'load_config', return_value={'auth_required': True, 'allowed_keys': ['test-key']}):
             client = TestClient(gateway.app)

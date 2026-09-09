@@ -7,6 +7,7 @@ import { gsap } from 'gsap'
 import { RefreshCw, CheckCircle2 } from 'lucide-react'
 import { QuotaTable } from './QuotaTable'
 import type { AccountQuota } from './quota'
+import { ModelPicker, type ModelOption } from './ModelPicker'
 
 // ─── Types ───
 
@@ -255,6 +256,10 @@ export default function App() {
   ])
   const [chatInput, setChatInput] = useState('')
   const [model, setModel] = useState('lite')
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelsError, setModelsError] = useState('')
+  const modelRequestRef = useRef(false)
   const [stream, setStream] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [showThinking, setShowThinking] = useState(true)
@@ -465,6 +470,29 @@ export default function App() {
   const fetchLogs = useCallback(async () => {
     try { const resp = await authedFetch('/ui/logs'); const data = await resp.json(); setLogs(data) } catch { /* */ }
   }, [authedFetch])
+
+  const loadModels = useCallback(async () => {
+    if (modelRequestRef.current) return
+    modelRequestRef.current = true
+    setLoadingModels(true)
+    setModelsError('')
+    try {
+      const resp = await authedFetch('/ui/models', { cache: 'no-store', signal: AbortSignal.timeout(15000) })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
+      if (!Array.isArray(data.data)) throw new Error(lang === 'zh' ? '模型列表格式异常' : 'Invalid model catalog')
+      const options: ModelOption[] = data.data.filter((entry: ModelOption) => entry && typeof entry.id === 'string' && entry.id.length > 0)
+        .map((entry: ModelOption) => ({ id: entry.id, name: typeof entry.name === 'string' && entry.name ? entry.name : entry.id }))
+      if (!options.length) throw new Error(lang === 'zh' ? '网关未配置模型' : 'No models configured in the gateway')
+      setModelOptions(options)
+      setModel(current => options.some(entry => entry.id === current) ? current : options.find(entry => entry.id === 'lite')?.id || options[0].id)
+    } catch (error) {
+      setModelsError(`${lang === 'zh' ? '加载失败，请刷新重试：' : 'Load failed; retry: '}${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      modelRequestRef.current = false
+      setLoadingModels(false)
+    }
+  }, [authedFetch, lang])
   useEffect(() => {
     if (!token) return
     fetchStatus(); fetchAccounts(); fetchApiConfig(); fetchLogs()
@@ -476,6 +504,10 @@ export default function App() {
   useEffect(() => {
     if (token && activeTab === 'accounts') void loadQuota()
   }, [token, activeTab, loadQuota])
+
+  useEffect(() => {
+    if (token && activeTab === 'playground') void loadModels()
+  }, [token, activeTab, loadModels])
 
   useEffect(() => { if (activeTab === 'logs') logEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs, activeTab])
   useEffect(() => { if (activeTab === 'playground') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages, activeTab])
@@ -634,7 +666,7 @@ export default function App() {
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = chatInput.trim()
-    if (!trimmed || generating) return
+    if (!trimmed || generating || loadingModels || !modelOptions.some(entry => entry.id === model)) return
     setChatMessages(prev => [...prev, { role: 'user', content: trimmed }])
     setChatInput(''); setGenerating(true)
     setChatMessages(prev => [...prev, { role: 'assistant', content: '' }])
@@ -1032,10 +1064,7 @@ export default function App() {
           {activeTab === 'playground' && (
             <div className="flex gap-8 h-[calc(100vh-14rem)]">
               <section className="w-[320px] flex flex-col gap-6 overflow-y-auto pr-4">
-                <div className="space-y-3">
-                  <label className="font-bold text-ink">{t.playground.modelConfig}</label>
-                  <CustomInput value={model} onChange={setModel} placeholder="e.g. lite, pro" />
-                </div>
+                <ModelPicker models={modelOptions} value={model} onChange={setModel} loading={loadingModels} error={modelsError} onRefresh={loadModels} lang={lang} disabled={generating} />
                 <div className="space-y-3">
                   <CustomCheckbox checked={stream} onChange={setStream} label={t.playground.streamResponse} />
                 </div>
@@ -1069,7 +1098,7 @@ export default function App() {
                 <form onSubmit={handleSendChat} className="p-8 border-t border-hairline bg-white/50">
                   <div className="flex items-center gap-3">
                     <CustomTextarea value={chatInput} onChange={setChatInput} placeholder={t.playground.ask} className="flex-1" />
-                    <button type="submit" disabled={generating || !chatInput.trim()} className="h-11 px-4 bg-ink text-white rounded-xl flex items-center gap-2 hover:bg-neutral-800 transition-all active:scale-95 shadow-md disabled:opacity-50 shrink-0">
+                    <button type="submit" disabled={generating || loadingModels || !modelOptions.some(entry => entry.id === model) || !chatInput.trim()} className="h-11 px-4 bg-ink text-white rounded-xl flex items-center gap-2 hover:bg-neutral-800 transition-all active:scale-95 shadow-md disabled:opacity-50 shrink-0">
                       <span className="font-bold text-sm">{t.playground.send}</span><span className="material-symbols-outlined text-sm">send</span>
                     </button>
                   </div>

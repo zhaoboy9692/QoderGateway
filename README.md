@@ -125,6 +125,17 @@ nohup uv run qoder2api >>nohup.out 2>&1 &
 
 更多模型、图片输入及 NewAPI 兼容说明见 [桥接兼容文档](docs/bridge-compatibility.md)。
 
+### 调试对话的模型选择
+
+进入 **调试对话** 时，“模型配置”自动加载网关当前配置的模型，使用下拉框选择。
+页面显示模型名称，发送请求使用对应模型 ID，例如 `GLM-5.3 → gmodel`、
+`Qwen3.8-Max → qmodel_38max`、`极致 → ultimate`，无需手动填写映射。
+
+**刷新模型** 可重新加载列表。目录来自网关的 `model_catalog.json`，也包含
+`QODER_MODEL_CATALOG_PATH` 指定的扩展配置；修改这些文件后需重启网关再刷新。
+这是已配置模型目录，不表示实时探测了各模型的上游可用性或账号权限。
+控制台通过管理员鉴权的 `GET /ui/models` 加载目录，外部客户端继续使用 `/v1/models`。
+
 ### 第一次 API 调用 / First API Call
 
 在控制台导入账号后：

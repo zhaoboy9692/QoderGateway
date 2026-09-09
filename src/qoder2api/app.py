@@ -384,10 +384,7 @@ def validate_api_key(authorization: str | None) -> None:
             raise HTTPException(status_code=401, detail="Invalid or missing API Key")
 
 
-@app.get("/v1/models")
-async def list_models(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    """OpenAI-compatible catalog of configured HTTP model presets."""
-    validate_api_key(authorization)
+def model_catalog_response() -> dict[str, Any]:
     return {
         "object": "list",
         "data": [
@@ -401,6 +398,19 @@ async def list_models(authorization: str | None = Header(default=None)) -> dict[
             for key, model in MODEL_CATALOG.items()
         ],
     }
+
+
+@app.get("/ui/models")
+async def ui_models(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    """Console model names and request IDs, including configured custom models."""
+    return model_catalog_response()
+
+
+@app.get("/v1/models")
+async def list_models(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """OpenAI-compatible catalog of configured HTTP model presets."""
+    validate_api_key(authorization)
+    return model_catalog_response()
 
 
 @app.post("/v1/chat/completions")
