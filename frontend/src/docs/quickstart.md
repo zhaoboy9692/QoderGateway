@@ -66,10 +66,9 @@ This password protects all management routes under `/ui/*` with the `X-Gateway-T
 
 Use one of these options:
 
-- Click **Auto Import** to import the current local Qoder auth session.
 - Paste a Qoder Personal Access Token into **Add PAT**.
 
-- Paste existing account JSON under **Account Pool → Batch Import**.
+- Paste existing account JSON under **Account Pool → Import Accounts**.
 
 Imported accounts are stored in SQLite and deduplicated by `uid`.
 

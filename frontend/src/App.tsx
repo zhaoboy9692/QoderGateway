@@ -17,7 +17,7 @@ interface Account {
   last_error: string | null; quota: number; is_quota_exceeded: boolean
   plan: string | null; user_tag: string | null; next_reset_at: number | null; remark: string | null
 }
-interface AccountsConfig { accounts: Account[]; active_uid: string | null }
+interface AccountsConfig { accounts: Account[]; active_uid: string | null; auto_schedule?: boolean; last_auto_uid?: string | null }
 interface UIStatus { ready: boolean; mode: string; username: string | null; uid: string | null; user_type: string | null; error: string | null; accounts_count: number }
 interface APIConfig { auth_required: boolean; allowed_keys: string[] }
 interface Message { role: 'user' | 'assistant'; content: string }
@@ -48,7 +48,7 @@ const UI_TEXT = {
     },
     common: { docs: 'Docs', support: 'Support', healthy: 'Healthy', offline: 'Offline', signOut: 'Sign Out', refresh: 'Refresh', add: 'Add', delete: 'Delete', copy: 'Copy' },
     dashboard: {
-      serviceStatus: 'Service Status', allGatewaysActive: 'All gateways active', noActiveSession: 'No active session', accountPool: 'Account Pool', activeSessions: 'Active Qoder accounts', apiAuth: 'API Auth', openAccess: 'Open access', activeUser: 'Active User', systemBriefing: 'System Briefing', readyBrief: 'Gateway is running. {count} account(s) are available for routing.', notReadyBrief: 'No active session is available. Import an account or add a PAT first.', recentNotifications: 'Recent Notifications', authImportError: 'Auth Import Error', sessionActive: 'Session Active', credentialConfig: 'Credential Configuration', credentialDesc: 'Add a Qoder PAT or import the current local Qoder auth session.', patPlaceholder: 'Enter Qoder PAT...', addPat: 'Add PAT', saving: 'Saving...', autoImport: 'Auto Import',
+      serviceStatus: 'Service Status', allGatewaysActive: 'All gateways active', noActiveSession: 'No active session', accountPool: 'Account Pool', activeSessions: 'Active Qoder accounts', apiAuth: 'API Auth', openAccess: 'Open access', activeUser: 'Active User', systemBriefing: 'System Briefing', readyBrief: 'Gateway is running. {count} account(s) are available for routing.', notReadyBrief: 'No active session is available. Import an account or add a PAT first.', recentNotifications: 'Recent Notifications', authImportError: 'Auth Import Error', sessionActive: 'Session Active', credentialConfig: 'Credential Configuration', credentialDesc: 'Add a Qoder PAT or import account JSON in the account pool.', patPlaceholder: 'Enter Qoder PAT...', addPat: 'Add PAT', saving: 'Saving...',
     },
     accounts: { desc: 'Manage Qoder accounts used by the gateway for request routing and failover.', refreshStatus: 'Refresh Status', importAccounts: 'Import Accounts', search: 'Search accounts...', empty: 'No accounts imported. Click Import Accounts or add a PAT from Dashboard.', showing: 'Showing {count} account(s)' },
     playground: { modelConfig: 'Model Configuration', streamResponse: 'Stream Response', systemPrompt: 'System Prompt', systemPromptPlaceholder: "Define the AI's persona...", ask: 'Ask anything...', send: 'Send', waiting: 'Waiting for response...' },
@@ -67,7 +67,7 @@ const UI_TEXT = {
     },
     common: { docs: '文档', support: '支持', healthy: '正常', offline: '未就绪', signOut: '退出', refresh: '刷新', add: '添加', delete: '删除', copy: '复制' },
     dashboard: {
-      serviceStatus: '服务状态', allGatewaysActive: '网关可用', noActiveSession: '没有可用账号', accountPool: '账号池', activeSessions: '可参与路由的 Qoder 账号', apiAuth: 'API 鉴权', openAccess: '未开启鉴权', activeUser: '当前账号', systemBriefing: '运行状态', readyBrief: '网关正在运行，当前有 {count} 个账号可用于请求路由。', notReadyBrief: '当前没有可用会话，请先导入账号或添加 PAT。', recentNotifications: '最近状态', authImportError: '本地登录导入失败', sessionActive: '账号已连接', credentialConfig: '凭据配置', credentialDesc: '添加 Qoder PAT，或导入本机已有的 Qoder 登录会话。', patPlaceholder: '输入 Qoder PAT...', addPat: '添加 PAT', saving: '保存中...', autoImport: '自动导入',
+      serviceStatus: '服务状态', allGatewaysActive: '网关可用', noActiveSession: '没有可用账号', accountPool: '账号池', activeSessions: '可参与路由的 Qoder 账号', apiAuth: 'API 鉴权', openAccess: '未开启鉴权', activeUser: '当前账号', systemBriefing: '运行状态', readyBrief: '网关正在运行，当前有 {count} 个账号可用于请求路由。', notReadyBrief: '当前没有可用会话，请先导入账号或添加 PAT。', recentNotifications: '最近状态', authImportError: '账号配置错误', sessionActive: '账号已连接', credentialConfig: '凭据配置', credentialDesc: '添加 Qoder PAT，或在账号池导入账号 JSON。', patPlaceholder: '输入 Qoder PAT...', addPat: '添加 PAT', saving: '保存中...',
     },
     accounts: { desc: '管理网关用于请求路由和失败切换的 Qoder 账号。', refreshStatus: '刷新状态', importAccounts: '导入账号', search: '搜索账号...', empty: '还没有导入账号。点击导入账号，或在控制台添加 PAT。', showing: '共 {count} 个账号' },
     playground: { modelConfig: '模型配置', streamResponse: '流式响应', systemPrompt: '系统提示词', systemPromptPlaceholder: '定义模型的角色或行为...', ask: '输入要发送的内容...', send: '发送', waiting: '正在等待响应...' },
@@ -273,6 +273,9 @@ export default function App() {
 
   const [showBatchImport, setShowBatchImport] = useState(false)
   const [batchJson, setBatchJson] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [savingScheduling, setSavingScheduling] = useState(false)
   const [refreshingTokens, setRefreshingTokens] = useState(false)
   const [quotaList, setQuotaList] = useState<AccountQuota[] | null>(null)
   const [refreshingQuota, setRefreshingQuota] = useState(false)
@@ -385,19 +388,20 @@ export default function App() {
   const doBatchImport = useCallback(async () => {
     let records: unknown
     try { records = JSON.parse(batchJson) } catch { pushToast('ERROR', lang === 'zh' ? 'JSON 解析失败' : 'Invalid JSON', ''); return }
-    const arr = Array.isArray(records) ? records : (records as { accounts?: unknown[] }).accounts || []
-    if (arr.length === 0) { pushToast('ERROR', lang === 'zh' ? '数组为空' : 'Empty array', ''); return }
+    const payload = Array.isArray(records) ? { accounts: records } : records
+    if (!payload || typeof payload !== 'object') { pushToast('ERROR', lang === 'zh' ? '无效的账号 JSON' : 'Invalid account JSON', ''); return }
+    setImporting(true)
     try {
-      const resp = await authedFetch('/ui/accounts/batch-import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accounts: arr }),
+      const resp = await authedFetch('/ui/accounts/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       })
       const data = await resp.json()
       if (data.status === 'ok') {
-        pushToast('SUCCESS', lang === 'zh' ? `导入 ${data.imported} 个账号` : `Imported ${data.imported}`, lang === 'zh' ? `跳过 ${data.skipped}` : `skipped ${data.skipped}`)
-        setBatchJson(''); setShowBatchImport(false); fetchAccounts()
+        pushToast('SUCCESS', lang === 'zh' ? `导入 ${data.imported} 个账号` : `Imported ${data.imported}`, lang === 'zh' ? `其中更新 ${data.updated} 个` : `${data.updated} updated`)
+        setBatchJson(''); setShowBatchImport(false); fetchAccounts(); fetchStatus(); setQuotaList(null); quotaAutoLoadRef.current = false
       } else { pushToast('ERROR', lang === 'zh' ? '导入失败' : 'Import failed', data.detail || '') }
-    } catch { pushToast('ERROR', lang === 'zh' ? '导入失败' : 'Import failed', '') }
-  }, [authedFetch, batchJson, lang, fetchAccounts, pushToast])
+    } catch { pushToast('ERROR', lang === 'zh' ? '导入失败' : 'Import failed', '') } finally { setImporting(false) }
+  }, [authedFetch, batchJson, lang, fetchAccounts, fetchStatus, pushToast])
 
   const doRefreshTokens = useCallback(async () => {
     setRefreshingTokens(true)
@@ -572,17 +576,32 @@ export default function App() {
 
   const handleLogout = () => { localStorage.removeItem('gateway_token'); setToken(null); setLoginSuccess(false) }
 
-  const handleImportAuth = async () => {
-    setLoading(true)
+  const handleExportAccounts = async () => {
+    setExporting(true)
     try {
-      const resp = await authedFetch('/ui/accounts/import', { method: 'POST' })
-      if (!resp.ok) { const err = await resp.json(); throw new Error(err.detail || 'Import failed') }
-      const data = await resp.json()
-      pushToast('SUCCESS', lang === 'zh' ? '账号已导入' : 'Account Imported', msg.imported(data.account?.name || (lang === 'zh' ? '本地会话' : 'local session')))
-      fetchAccounts(); fetchStatus(); fetchLogs()
-    } catch (err: any) {
-      pushToast('ERROR', msg.importFailed, err.message)
-    } finally { setLoading(false) }
+      const response = await authedFetch('/ui/accounts/export')
+      if (!response.ok) throw new Error(lang === 'zh' ? '导出失败' : 'Export failed')
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `qodergate-accounts-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(link); link.click(); link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error: any) { pushToast('ERROR', lang === 'zh' ? '导出失败' : 'Export failed', error.message) }
+    finally { setExporting(false) }
+  }
+
+  const handleScheduling = async () => {
+    setSavingScheduling(true)
+    try {
+      const response = await authedFetch('/ui/accounts/scheduling', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !accountsConfig.auto_schedule }),
+      })
+      if (!response.ok) throw new Error(lang === 'zh' ? '调度设置保存失败' : 'Could not save scheduling')
+      await fetchAccounts(); await fetchStatus()
+    } catch (error: any) { pushToast('ERROR', lang === 'zh' ? '保存失败' : 'Save failed', error.message) }
+    finally { setSavingScheduling(false) }
   }
 
   const handleSavePat = async () => {
@@ -977,8 +996,8 @@ export default function App() {
                     <button onClick={handleSavePat} disabled={submittingPat} className="bg-ink text-white font-bold px-5 py-3 rounded-lg text-sm transition-all hover:bg-primary disabled:opacity-50">
                       {submittingPat ? t.dashboard.saving : t.dashboard.addPat}
                     </button>
-                    <button onClick={handleImportAuth} className="flex items-center gap-2 px-4 py-3 text-ink hover:bg-canvas-soft border border-hairline font-semibold rounded-lg text-sm transition-all">
-                      <span className="material-symbols-outlined text-[18px]">refresh</span>{t.dashboard.autoImport}
+                    <button onClick={() => { setActiveTab('accounts'); setShowBatchImport(true) }} className="flex items-center gap-2 px-4 py-3 text-ink hover:bg-canvas-soft border border-hairline font-semibold rounded-lg text-sm transition-all">
+                      <span className="material-symbols-outlined text-[18px]">file_upload</span>{t.accounts.importAccounts}
                     </button>
                   </div>
                 </div>
@@ -993,7 +1012,7 @@ export default function App() {
                 <div className="max-w-xl"><p className="text-body text-[16px]">{t.accounts.desc}</p></div>
                 <div className="flex gap-4 flex-wrap">
                   <button onClick={() => { setShowBatchImport(v => !v) }} className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all font-bold text-sm border ${showBatchImport ? 'bg-ink text-white border-ink' : 'text-body hover:text-ink border-hairline'}`}>
-                    <span className="material-symbols-outlined text-[18px]">file_upload</span>{lang === 'zh' ? '批量导入' : 'Batch Import'}
+                    <span className="material-symbols-outlined text-[18px]">file_upload</span>{t.accounts.importAccounts}
                   </button>
                   <button onClick={doRefreshTokens} disabled={refreshingTokens} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-40">
                     <span className="material-symbols-outlined text-[18px]">autorenew</span>{refreshingTokens ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新 Token' : 'Refresh Tokens')}
@@ -1004,15 +1023,33 @@ export default function App() {
                   <button onClick={handleRefreshStatus} disabled={refreshingQuota || !!refreshingAccount} className="flex items-center gap-2 px-4 py-2.5 text-body hover:text-ink transition-colors font-bold text-sm disabled:opacity-50">
                     <RefreshCw size={18} className={refreshingQuota ? 'animate-spin' : ''} aria-hidden="true" />{refreshingQuota ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : t.accounts.refreshStatus}
                   </button>
-                  <button onClick={handleImportAuth} className="flex items-center gap-2 px-6 py-2.5 bg-ink text-white rounded-lg hover:bg-neutral-800 transition-all font-bold text-sm shadow-md">
-                    <span className="material-symbols-outlined text-[18px]">add</span>{t.accounts.importAccounts}
+                  <button onClick={handleExportAccounts} disabled={exporting || !accountsConfig.accounts.length} className="flex items-center gap-2 px-6 py-2.5 bg-ink text-white rounded-lg hover:bg-neutral-800 transition-all font-bold text-sm shadow-md">
+                    <span className="material-symbols-outlined text-[18px]">file_download</span>{exporting ? (lang === 'zh' ? '导出中...' : 'Exporting...') : (lang === 'zh' ? '导出账号' : 'Export accounts')}
                   </button>
                 </div>
               </section>
 
+              <section className="bg-surface-card border border-hairline rounded-2xl p-6 flex items-center justify-between gap-6">
+                <div>
+                  <h3 className="font-bold text-ink">{lang === 'zh' ? '自动调度账号' : 'Automatic account scheduling'}</h3>
+                  <p className="text-sm text-body mt-2">{lang === 'zh' ? '开启后，无需手动激活，自动轮流使用有个人或团队额度的已启用账号；额度缓存最长 60 秒。' : 'Automatically rotate enabled accounts with personal or team credits. Quota is cached for up to 60 seconds.'}</p>
+                  <p className="text-xs text-body mt-2">{lang === 'zh' ? '导出文件包含账号登录凭据，请妥善保存，勿上传到 Git。' : 'Exports contain account credentials. Keep them private and out of Git.'}</p>
+                </div>
+                <button type="button" role="switch" aria-checked={!!accountsConfig.auto_schedule} aria-label={lang === 'zh' ? '自动调度账号' : 'Automatic account scheduling'} onClick={handleScheduling} disabled={savingScheduling} className={`shrink-0 px-5 py-2 rounded-full text-sm font-bold disabled:opacity-50 ${accountsConfig.auto_schedule ? 'bg-ink text-white' : 'bg-canvas-soft border border-hairline text-body'}`}>
+                  {savingScheduling ? (lang === 'zh' ? '保存中...' : 'Saving...') : accountsConfig.auto_schedule ? (lang === 'zh' ? '已开启' : 'On') : (lang === 'zh' ? '已关闭' : 'Off')}
+                </button>
+              </section>
+
               {showBatchImport && (
                 <section className="bg-surface-card border border-hairline rounded-2xl p-6">
-                  <label className="text-[12px] font-semibold text-body mb-3 block uppercase tracking-widest">{lang === 'zh' ? '粘贴账号 JSON（accounts.json）' : 'Paste account JSON (accounts.json)'}</label>
+                  <label className="text-sm font-semibold text-body mb-3 block">{lang === 'zh' ? '选择导出文件，或粘贴账号 JSON' : 'Select an export file or paste account JSON'}
+                    <input type="file" accept=".json,application/json" disabled={importing} className="block mt-3 mb-4 text-sm" onChange={async event => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      if (file.size > 8 * 1024 * 1024) { pushToast('ERROR', lang === 'zh' ? '文件不能超过 8 MB' : 'Maximum file size is 8 MB', ''); return }
+                      try { setBatchJson(await file.text()) } catch { pushToast('ERROR', lang === 'zh' ? '文件读取失败' : 'Could not read file', '') }
+                    }} />
+                  </label>
                   <textarea
                     value={batchJson}
                     onChange={e => setBatchJson(e.target.value)}
@@ -1021,7 +1058,7 @@ export default function App() {
                     className="w-full p-4 rounded-xl border border-hairline bg-white/60 font-mono text-[13px] text-ink outline-none focus:border-ink/30 transition-colors"
                   />
                   <div className="mt-3 flex gap-3">
-                    <button onClick={doBatchImport} className="bg-ink text-white font-bold px-6 py-2.5 rounded-lg text-sm transition-all hover:bg-neutral-800">{lang === 'zh' ? '导入' : 'Import'}</button>
+                    <button onClick={doBatchImport} disabled={importing || !batchJson.trim()} className="bg-ink text-white font-bold px-6 py-2.5 rounded-lg text-sm transition-all hover:bg-neutral-800">{lang === 'zh' ? '导入' : 'Import'}</button>
                     <button onClick={() => { setBatchJson(''); setShowBatchImport(false) }} className="px-4 py-2.5 text-body border border-hairline rounded-lg text-sm font-bold hover:text-ink">{lang === 'zh' ? '取消' : 'Cancel'}</button>
                   </div>
                 </section>
@@ -1080,10 +1117,10 @@ export default function App() {
                           return !query || acc.name.toLowerCase().includes(query) || acc.uid.toLowerCase().includes(query) || (acc.remark || '').toLowerCase().includes(query)
                         })
                         .map((acc) => {
-                          const isActive = accountsConfig.active_uid === acc.uid
+                          const isActive = (accountsConfig.auto_schedule ? accountsConfig.last_auto_uid : accountsConfig.active_uid) === acc.uid
                           return (
                             <tr key={acc.uid} className={`hover:bg-canvas-soft transition-colors group ${isActive ? 'bg-mint/5' : ''}`}>
-                              <td className="px-6 py-5 font-bold text-ink"><div className="flex items-center gap-2">{acc.name}{isActive && <span className="text-[9px] bg-mint/20 text-ink px-1.5 py-0.5 rounded font-extrabold uppercase">Active</span>}</div></td>
+                              <td className="px-6 py-5 font-bold text-ink"><div className="flex items-center gap-2">{acc.name}{isActive && <span className="text-[9px] bg-mint/20 text-ink px-1.5 py-0.5 rounded font-extrabold uppercase">{accountsConfig.auto_schedule ? (lang === 'zh' ? '最近调度' : 'Last routed') : 'Active'}</span>}</div></td>
                               <td className="px-6 py-5"><div className="flex flex-col gap-1"><span className="text-xs font-semibold text-ink">{acc.user_tag === 'Teams' && lang === 'zh' ? 'Teams（团队版）' : acc.user_tag || acc.plan || (lang === 'zh' ? '未获取套餐' : 'Plan not fetched')}</span><span className="text-[10px] text-body">{lang === 'zh' ? 'Credits 额度见上方限额表' : 'See credits in the quota table above'}</span></div></td>
                               <td className="px-6 py-5">
                                 {acc.is_quota_exceeded ? <span className="px-3 py-1 text-[10px] font-bold rounded-full uppercase tracking-wider bg-red-100 text-red-700">Exceeded</span>
@@ -1102,7 +1139,7 @@ export default function App() {
                                     <RefreshCw size={16} className={refreshingAccount === acc.uid ? 'animate-spin' : ''} aria-hidden="true" />
                                     {refreshingAccount === acc.uid ? (lang === 'zh' ? '刷新中...' : 'Refreshing...') : (lang === 'zh' ? '刷新' : 'Refresh')}
                                   </button>
-                                  <button onClick={() => handleSelectAccount(acc.uid)} disabled={isActive || !acc.enabled} className="text-body hover:text-ink disabled:opacity-30" title="Activate"><span className="material-symbols-outlined">play_circle</span></button>
+                                  <button onClick={() => handleSelectAccount(acc.uid)} disabled={accountsConfig.auto_schedule || isActive || !acc.enabled} className="text-body hover:text-ink disabled:opacity-30" title="Activate"><span className="material-symbols-outlined">play_circle</span></button>
                                   <button onClick={() => handleDeleteAccount(acc.uid)} className="text-body hover:text-red-600" title="Delete"><span className="material-symbols-outlined">delete</span></button>
                                 </div>
                               </td>

@@ -69,7 +69,7 @@ function Landing() {
 
       <section ref={cardsRef} className="relative z-10 max-w-7xl mx-auto px-8 pb-24 grid grid-cols-1 md:grid-cols-3 gap-5">
         {[
-          ['account_tree', lang === 'zh' ? '多账号轮转' : 'Multi-account routing', lang === 'zh' ? '导入 PAT 或本地登录会话，按 UID 去重，请求失败时自动切换账号。' : 'Import PATs or local auth sessions, deduplicate by UID, and rotate automatically on failures.'],
+          ['account_tree', lang === 'zh' ? '多账号轮转' : 'Multi-account routing', lang === 'zh' ? '通过 PAT 或 JSON 导入账号，支持按额度自动调度。' : 'Import PATs or account JSON and optionally schedule accounts by remaining credits.'],
           ['vpn_key', lang === 'zh' ? '两层鉴权' : 'Two-layer auth', lang === 'zh' ? '管理后台密钥和外部 API Key 分开配置，避免客户端拿到后台权限。' : 'Separate management gateway tokens from external Bearer API keys for safer local operation.'],
           ['menu_book', lang === 'zh' ? '独立文档站' : 'Markdown docs', lang === 'zh' ? '文档页面独立于后台，说明安装、调用、运维和架构。' : 'A standalone static wiki explains setup, API usage, operations, and architecture.'],
         ].map(([icon, title, desc]) => (

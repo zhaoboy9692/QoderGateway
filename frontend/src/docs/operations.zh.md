@@ -48,7 +48,7 @@ Copy-Item "$env:USERPROFILE\.qoder\qoder2api.db" "$env:USERPROFILE\Desktop\qoder
 
 ### 没有可用会话
 
-导入网关主机上的已有 Qoder 登录会话、添加 PAT，或导入账号 JSON。本地自动导入失败时检查对应登录文件是否存在；推理本身不依赖运行 CLI。
+添加 PAT，或在账号池导入 JSON 文件。本地登录扫描已移除；推理不依赖运行 CLI。
 
 ### 额度看似没刷新
 

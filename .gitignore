@@ -20,3 +20,9 @@ scripts/*.png
 
 # 账号导出凭据
 accounts.json
+qodergate-accounts*.json
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.qoder/

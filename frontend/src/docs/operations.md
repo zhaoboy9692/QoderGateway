@@ -48,7 +48,7 @@ Management endpoints require `X-Gateway-Token`; external APIs require `Authoriza
 
 ### No Active Session
 
-Import an existing Qoder session on the gateway host, add a PAT, or import account JSON. If local import fails, check that the login files exist. Inference itself does not require a running CLI.
+Add a PAT or import account JSON in Account Pool. Local login scanning has been removed. Inference does not require a running CLI.
 
 ### Quotas Appear Unchanged
 

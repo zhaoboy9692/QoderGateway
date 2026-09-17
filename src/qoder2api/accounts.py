@@ -1,11 +1,8 @@
-import copy
-import uuid
 from typing import Any
 
 from .auth import (
     AuthIdentity,
     SessionContext,
-    load_local_session,
     new_session,
     new_machine,
     fetch_user_status
@@ -38,7 +35,7 @@ def db_load_accounts() -> dict[str, Any]:
             account.pop("machine_id", None)
             accounts.append(account)
         active_uid = db_get_settings("active_uid")
-        return {"accounts": accounts, "active_uid": active_uid}
+        return {"accounts": accounts, "active_uid": active_uid, "auto_schedule": db_get_settings("auto_schedule", "0") == "1", "last_auto_uid": db_get_settings("last_auto_uid")}
 
 
 async def refresh_account_metadata(uid: str) -> dict[str, Any]:
@@ -67,148 +64,10 @@ async def refresh_account_metadata(uid: str) -> dict[str, Any]:
         return {"ok": False, "uid": uid, "error": f"账号资料查询失败 ({type(exc).__name__})"}
 
 
-async def import_current_auth() -> dict[str, Any]:
-    """Decrypts current local auth files, queries quota status, and saves to SQLite."""
-    sess = load_local_session()
-    
-    # Query current user quota and metadata from Qoder backend
-    quota_val = 0
-    is_exceeded = 0
-    plan_val = "PLAN_TIER_PRO_TRIAL"
-    user_tag_val = "Pro Trial"
-    next_reset = None
-    
-    try:
-        status_data = await fetch_user_status(
-            sess.identity.uid,
-            sess.machine_id,
-            sess.machine_token,
-            sess.machine_type
-        )
-        quota_val = status_data.get("quota", 0)
-        is_exceeded = 1 if status_data.get("isQuotaExceeded", False) else 0
-        plan_val = status_data.get("plan", "PLAN_TIER_PRO_TRIAL")
-        user_tag_val = status_data.get("userTag", "Pro Trial")
-        next_reset = status_data.get("nextResetAt")
-    except Exception as e:
-        # Fallback if network call fails
-        print(f"Network error querying Qoder status: {e}")
-
-    uid = sess.identity.uid
-    name = sess.identity.name or "Unnamed"
-
-    with get_db() as conn:
-        # Check if already exists to keep enabled state
-        existing = conn.execute("SELECT enabled FROM accounts WHERE uid = ?", (uid,)).fetchone()
-        enabled = existing[0] if existing else 1
-
-        conn.execute(
-            """
-            INSERT INTO accounts (
-                uid, name, user_type, security_oauth_token, refresh_token, machine_id,
-                enabled, last_status, last_error, quota, is_quota_exceeded, plan,
-                user_tag, next_reset_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(uid) DO UPDATE SET
-                name = excluded.name,
-                user_type = excluded.user_type,
-                security_oauth_token = excluded.security_oauth_token,
-                refresh_token = excluded.refresh_token,
-                machine_id = excluded.machine_id,
-                enabled = excluded.enabled,
-                last_status = excluded.last_status,
-                last_error = excluded.last_error,
-                quota = excluded.quota,
-                is_quota_exceeded = excluded.is_quota_exceeded,
-                plan = excluded.plan,
-                user_tag = excluded.user_tag,
-                next_reset_at = excluded.next_reset_at
-            """,
-            (
-                uid, name, sess.identity.user_type, sess.identity.security_oauth_token,
-                sess.identity.refresh_token, sess.machine_id, enabled, "ok", None,
-                quota_val, is_exceeded, plan_val, user_tag_val, next_reset
-            )
-        )
-
-    # Set as active if none set
-    active_uid = db_get_settings("active_uid")
-    if not active_uid:
-        db_set_settings("active_uid", uid)
-
-    return {
-        "uid": uid,
-        "name": name,
-        "user_type": sess.identity.user_type,
-        "enabled": bool(enabled),
-        "last_status": "ok",
-        "quota": quota_val,
-        "is_quota_exceeded": bool(is_exceeded),
-        "plan": plan_val,
-        "user_tag": user_tag_val,
-        "next_reset_at": next_reset
-    }
-
-
-def batch_import_accounts(records: list[dict]) -> dict:
-    """批量导入账号 JSON。
-
-    每条记录字段：email/password/name/user_id/token/refresh_token/expires_at/...
-    返回 {"imported": n, "skipped": m}。
-    """
-    imported = 0
-    skipped = 0
-    with get_db() as conn:
-        for rec in records:
-            uid = str(rec.get("user_id") or "").strip()
-            token = str(rec.get("token") or rec.get("security_oauth_token") or "").strip()
-            if not uid and not token:
-                skipped += 1
-                continue
-            if not uid:
-                # 无 user_id 时用 token 前 12 位兜底主键
-                uid = "tok_" + token[:24]
-            existing = conn.execute("SELECT enabled FROM accounts WHERE uid = ?", (uid,)).fetchone()
-            enabled = existing[0] if existing else 1
-            conn.execute(
-                """
-                INSERT INTO accounts (
-                    uid, name, user_type, security_oauth_token, refresh_token, machine_id,
-                    enabled, last_status, last_error, quota, is_quota_exceeded, plan, user_tag, next_reset_at, token_expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'ok', NULL, 0, 0, 'PLAN_TIER_PRO_TRIAL', 'Pro Trial', NULL, ?)
-                ON CONFLICT(uid) DO UPDATE SET
-                    name = excluded.name,
-                    user_type = excluded.user_type,
-                    security_oauth_token = excluded.security_oauth_token,
-                    refresh_token = excluded.refresh_token,
-                    machine_id = excluded.machine_id,
-                    enabled = excluded.enabled,
-                    last_status = excluded.last_status,
-                    last_error = excluded.last_error,
-                    quota = excluded.quota,
-                    is_quota_exceeded = excluded.is_quota_exceeded,
-                    plan = excluded.plan,
-                    user_tag = excluded.user_tag,
-                    next_reset_at = excluded.next_reset_at,
-                    token_expires_at = excluded.token_expires_at
-                """,
-                (
-                    uid,
-                    str(rec.get("name") or rec.get("email") or "Imported"),
-                    "personal_standard",
-                    token,
-                    str(rec.get("refresh_token") or ""),
-                    str(uuid.uuid4()),
-                    enabled,
-                    str(rec.get("expires_at") or ""),
-                ),
-            )
-            imported += 1
-        if not db_get_settings("active_uid"):
-            active = conn.execute("SELECT uid FROM accounts WHERE enabled = 1 LIMIT 1").fetchone()
-            if active:
-                db_set_settings("active_uid", active["uid"])
-    return {"imported": imported, "skipped": skipped}
+def batch_import_accounts(records: list) -> dict:
+    """Compatibility entry point for existing JSON import callers."""
+    from .account_transfer import import_accounts
+    return import_accounts({"accounts": records})
 
 
 def get_active_session() -> SessionContext:
@@ -232,6 +91,10 @@ def get_active_session() -> SessionContext:
     if not account:
         raise ValueError("No active or enabled accounts found in database. Please import or configure an account.")
 
+    return session_for_account(account)
+
+
+def session_for_account(account: dict) -> SessionContext:
     identity = AuthIdentity(
         name=account["name"],
         aid=account["uid"],

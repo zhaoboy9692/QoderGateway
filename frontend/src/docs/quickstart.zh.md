@@ -66,10 +66,9 @@ QODER_ADMIN_PASSWORD=your-strong-password
 
 可使用以下方式：
 
-- 点击**自动导入**，从本机 Qoder auth 会话自动导入。
 - 在**添加 PAT** 中粘贴 Qoder Personal Access Token。
 
-- 在**账号池 → 批量导入**中粘贴已有账号 JSON。
+- 在**账号池 → 导入账号**中粘贴已有账号 JSON。
 
 导入后的账号会存入本地 SQLite，并按 `uid` 自动去重。
 

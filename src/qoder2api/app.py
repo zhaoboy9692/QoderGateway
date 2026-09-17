@@ -9,10 +9,12 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Depends
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .auth import SessionContext, create_session, load_local_session
+from .auth import SessionContext, create_session
+from .account_transfer import export_accounts, import_accounts
+from .scheduler import select_auto_session, invalidate_quota, mark_failed, NoAvailableAccount
 from .bridge import MODEL_CATALOG, complete_openai_response, stream_openai_response
 from .config import load_config, save_config
 from .database import get_db
@@ -21,10 +23,8 @@ from .accounts import (
     db_load_accounts,
     db_get_settings,
     db_set_settings,
-    import_current_auth,
     get_active_session,
     rotate_next_account,
-    batch_import_accounts,
     refresh_account_metadata,
 )
 from .tokens import (
@@ -114,17 +114,6 @@ async def get_session() -> SessionContext:
             except Exception as exc:
                 add_log(f"Failed to import environment PAT: {exc}", "ERROR")
 
-        data = db_load_accounts()
-        if not data["accounts"]:
-            add_log("No accounts stored. Attempting to auto-import current local Qoder auth session...")
-            try:
-                await import_current_auth()
-                add_log("Auto-imported current local Qoder session successfully.")
-                _local_auth_error = None
-            except Exception as exc:
-                _local_auth_error = str(exc)
-                add_log(f"Auto-import of local session failed: {exc}", "WARNING")
-
     try:
         return get_active_session()
     except Exception as exc:
@@ -156,18 +145,21 @@ async def documents() -> HTMLResponse:
 @app.get("/ui/status")
 async def status(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
     global _local_auth_error
-    try:
-        await get_session()
-    except Exception:
-        pass
-
     data = db_load_accounts()
-    active_uid = data.get("active_uid")
+    if not data.get("auto_schedule") or not data["accounts"]:
+        try:
+            await get_session()
+        except Exception:
+            pass
+        data = db_load_accounts()
+    active_uid = data.get("last_auto_uid") if data.get("auto_schedule") else data.get("active_uid")
     active_acc = None
     for acc in data["accounts"]:
-        if acc["uid"] == active_uid:
+        if acc["uid"] == active_uid and acc.get("enabled"):
             active_acc = acc
             break
+    if active_acc is None and data.get("auto_schedule"):
+        active_acc = next((acc for acc in data["accounts"] if acc.get("enabled")), None)
 
     if active_acc is not None:
         return {
@@ -196,29 +188,40 @@ async def get_accounts(verify: None = Depends(check_gateway_token)) -> dict[str,
 
 
 @app.post("/ui/accounts/import")
-async def import_account(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    try:
-        acc = await import_current_auth()
-        add_log(f"Imported local Qoder session account: {acc['name']}")
-        return {"status": "ok", "account": acc}
-    except Exception as exc:
-        add_log(f"Failed to import local session account: {exc}", "ERROR")
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @app.post("/ui/accounts/batch-import")
 async def batch_import(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
-    """批量导入账号 JSON：{"accounts": [{user_id, token, refresh_token, ...}]}。"""
-    records = payload.get("accounts") or payload.get("records") or []
-    if not isinstance(records, list) or not records:
-        raise HTTPException(status_code=400, detail="accounts 数组为空")
-    result = batch_import_accounts(records)
-    add_log(f"Batch imported {result['imported']} accounts (skipped {result['skipped']})")
+    try:
+        result = await asyncio.to_thread(import_accounts, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await asyncio.to_thread(invalidate_quota)
+    add_log(f"Imported {result['imported']} accounts; updated {result['updated']}")
     return {"status": "ok", **result}
+
+
+@app.get("/ui/accounts/export")
+async def download_accounts(verify: None = Depends(check_gateway_token)):
+    payload = await asyncio.to_thread(export_accounts)
+    return JSONResponse(payload, headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="qodergate-accounts-{datetime.now():%Y%m%d}.json"',
+    })
+
+
+@app.post("/ui/accounts/scheduling")
+async def set_scheduling(payload: dict[str, Any], verify: None = Depends(check_gateway_token)):
+    enabled = payload.get("enabled")
+    if type(enabled) is not bool:
+        raise HTTPException(status_code=400, detail="enabled must be a boolean")
+    db_set_settings("auto_schedule", "1" if enabled else "0")
+    await asyncio.to_thread(invalidate_quota)
+    return {"status": "ok", "auto_schedule": enabled}
 
 
 @app.post("/ui/accounts/select")
 async def select_account(payload: dict[str, Any], verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
+    if db_get_settings("auto_schedule", "0") == "1":
+        raise HTTPException(status_code=409, detail="Disable automatic scheduling before selecting an account")
     uid = payload.get("uid")
     if not uid:
         raise HTTPException(status_code=400, detail="uid is required")
@@ -243,6 +246,7 @@ async def toggle_account(payload: dict[str, Any], verify: None = Depends(check_g
         if res.rowcount == 0:
             raise HTTPException(status_code=404, detail="Account not found")
     add_log(f"Account toggle enabled={enabled} for UID: {uid}")
+    await asyncio.to_thread(invalidate_quota, uid)
     return {"status": "ok"}
 
 
@@ -269,7 +273,8 @@ async def update_account_remark(
 @app.post("/ui/accounts/refresh-tokens")
 async def refresh_account_tokens(verify: None = Depends(check_gateway_token)) -> dict[str, Any]:
     """手动触发：刷新所有账号的 token（drt- → deviceToken/refresh）。"""
-    result = refresh_all_account_tokens()
+    result = await asyncio.to_thread(refresh_all_account_tokens)
+    await asyncio.to_thread(invalidate_quota)
     add_log(f"Token refresh: ok={result['ok']} failed={result['failed']} total={result['total']}")
     return {"status": "ok", **result}
 
@@ -283,6 +288,7 @@ async def accounts_quota(verify: None = Depends(check_gateway_token)) -> dict[st
         async with limit:
             return await refresh_account_metadata(uid)
     result["metadata"] = await asyncio.gather(*(refresh(q["uid"]) for q in result["quotas"]))
+    await asyncio.to_thread(invalidate_quota)
     return result
 
 
@@ -294,6 +300,7 @@ async def refresh_account(uid: str, verify: None = Depends(check_gateway_token))
     metadata, quota = await asyncio.gather(
         refresh_account_metadata(uid), asyncio.to_thread(get_account_quota, uid),
     )
+    await asyncio.to_thread(invalidate_quota, uid)
     return {"ok": metadata["ok"] and quota["ok"], "metadata": metadata, "quota": quota}
 
 
@@ -314,6 +321,7 @@ async def delete_account(uid: str, verify: None = Depends(check_gateway_token)) 
             with get_db() as conn:
                 conn.execute("DELETE FROM settings WHERE key = 'active_uid'")
     add_log(f"Deleted account UID: {uid}")
+    await asyncio.to_thread(invalidate_quota, uid)
     return {"status": "ok"}
 
 
@@ -367,6 +375,7 @@ async def set_session(payload: dict[str, Any], verify: None = Depends(check_gate
             )
             
         db_set_settings("active_uid", sess.identity.uid)
+        await asyncio.to_thread(invalidate_quota, sess.identity.uid)
         
         add_log(f"Session saved from PAT. User: {sess.identity.name}")
         _local_auth_error = None
@@ -463,10 +472,14 @@ async def chat_completions(payload: dict[str, Any], authorization: str | None = 
     accounts_data = db_load_accounts()
     enabled_count = sum(1 for acc in accounts_data["accounts"] if acc.get("enabled", True))
     max_retries = max(1, enabled_count)
+    auto_schedule = accounts_data.get("auto_schedule", False)
+    attempted = set()
     
     for attempt in range(max_retries):
+        sess = None
         try:
-            sess = await get_session()
+            sess = await asyncio.to_thread(select_auto_session, attempted) if auto_schedule else await get_session()
+            attempted.add(sess.identity.uid)
             add_log(f"Request routing via account: {sess.identity.name} ({sess.identity.uid})")
             if stream:
                 gen = stream_openai_response(payload, sess)
@@ -497,12 +510,16 @@ async def chat_completions(payload: dict[str, Any], authorization: str | None = 
                 resp = await complete_openai_response(payload, sess)
                 add_log("Completion request finished successfully.")
                 return resp
+        except NoAvailableAccount as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except HTTPException:
+            raise
         except Exception as exc:
-            current_uid = sess.identity.uid if 'sess' in locals() else "unknown"
+            current_uid = sess.identity.uid if sess else "unknown"
             if is_account_error(exc):
                 if is_quota_error(exc):
                     # quota 类错误：先发一次请求确认是否真正 exceeded，而不是直接跳过
-                    q = get_account_quota(current_uid)
+                    q = await asyncio.to_thread(get_account_quota, current_uid)
                     if q.get("ok"):
                         quota = q["quota"]
                         truly_exceeded = quota_is_exhausted(quota)
@@ -517,7 +534,10 @@ async def chat_completions(payload: dict[str, Any], authorization: str | None = 
                 else:
                     add_log(f"Account-level error on {current_uid}: {exc}. Rotating to next account...", "WARNING")
                 try:
-                    rotate_next_account(current_uid, str(exc))
+                    if auto_schedule:
+                        await asyncio.to_thread(mark_failed, current_uid)
+                    else:
+                        rotate_next_account(current_uid, str(exc))
                 except Exception as e:
                     add_log(f"Failed to rotate account: {e}", "ERROR")
                     raise HTTPException(status_code=502, detail=f"Request failed and no other account is available. Error: {exc}")

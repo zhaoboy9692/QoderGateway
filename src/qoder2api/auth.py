@@ -5,7 +5,6 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
-from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
@@ -193,43 +192,6 @@ async def create_session(personal_token: str) -> SessionContext:
     return new_session(identity, machine_id, machine_token, machine_type)
 
 
-def load_local_session() -> SessionContext:
-    auth_dir = Path.home() / ".qoder" / ".auth"
-    id_path = auth_dir / "id"
-    if not id_path.exists():
-        id_path = auth_dir / "machine_id"
-    user_path = auth_dir / "user"
-    if not id_path.exists() or not user_path.exists():
-        raise FileNotFoundError("Local Qoder auth files (id/machine_id and user) not found.")
-    
-    machine_id = id_path.read_text(encoding="utf-8").strip()
-    cipher_bytes = base64.b64decode(user_path.read_text(encoding="utf-8").strip())
-    
-    key = machine_id[:16].encode("ascii")
-    
-    cipher = Cipher(algorithms.AES(key), modes.CBC(key))
-    decryptor = cipher.decryptor()
-    padded_plain = decryptor.update(cipher_bytes) + decryptor.finalize()
-    
-    unpadder = padding.PKCS7(128).unpadder()
-    plain = unpadder.update(padded_plain) + unpadder.finalize()
-    
-    data = json.loads(plain.decode("utf-8"))
-    
-    identity = AuthIdentity(
-        name=data.get("name", ""),
-        aid=data.get("id") or data.get("aid") or data.get("uid") or "",
-        uid=data.get("id") or data.get("uid") or data.get("aid") or "",
-        yx_uid=data.get("yx_uid") or data.get("yxUid") or "",
-        organization_id=data.get("organization_id") or data.get("organizationId") or "",
-        organization_name=data.get("organization_name") or data.get("organizationName") or "",
-        user_type=data.get("userType") or data.get("user_type") or "personal_standard",
-        security_oauth_token=data.get("securityOauthToken") or data.get("security_oauth_token") or "",
-        refresh_token=data.get("refreshToken") or data.get("refresh_token") or "",
-    )
-    
-    _, machine_token, machine_type = new_machine()
-    return new_session(identity, machine_id, machine_token, machine_type)
 
 
 async def fetch_user_status(user_id: str, machine_id: str, machine_token: str, machine_type: str) -> dict[str, Any]:

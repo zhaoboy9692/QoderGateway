@@ -22,7 +22,7 @@ Client
 | --- | --- |
 | `app.py` | FastAPI routes, UI auth, request routing. |
 | `accounts.py` | SQLite account CRUD and active session selection. |
-| `auth.py` | PAT exchange, local-session import, and user-status queries. |
+| `auth.py` | PAT exchange and user-status queries. |
 | `bridge.py` | OpenAI-compatible stream and response conversion. |
 | `signature.py` | Bearer signing implementation. |
 | `database.py` | SQLite schema and connection helpers. |

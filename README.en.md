@@ -20,7 +20,7 @@ Inspired by [cubk1/qoder2api](https://github.com/cubk1/qoder2api/). The Python b
 - Persistent inline account remarks with search by account name, UID, or remark.
 - Chinese and English documentation with search, navigation, and language switching.
 
-Import existing Qoder sessions, PATs, or account JSON. Automatic registration, standalone registration tools, and their browser dependencies have been removed.
+Import PATs or account JSON and export backups. Enable automatic scheduling to rotate accounts with personal or team credits. Local login scanning has been removed. Automatic registration, standalone registration tools, and their browser dependencies have been removed.
 
 ## Quickstart
 
